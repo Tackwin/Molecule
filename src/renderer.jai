@@ -38,16 +38,26 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     renderer.surface = gpu.wgpuInstanceCreateSurface(renderer.instance, null);
 
     adapter_info: WGPURequestAdapterCallbackInfo = .{};
+    adapter_info.mode = .AllowProcessEvents;
     adapter_info.callback = adapter_ready;
     adapter_info.userdata1 = renderer;
-    gpu.wgpuInstanceRequestAdapter(renderer.instance, null, adapter_info);
+    adapter_options: WGPURequestAdapterOptions = .{};
+    adapter_options.compatibleSurface = renderer.surface;
+    gpu.wgpuInstanceRequestAdapter(renderer.instance, *adapter_options, adapter_info);
+    while !renderer.adapter {
+        gpu.wgpuInstanceProcessEvents(renderer.instance);
+    }
     if !renderer.adapter return;
 
     device_info: WGPURequestDeviceCallbackInfo = .{};
+    device_info.mode = .AllowProcessEvents;
     device_info.callback = device_ready;
     device_info.userdata1 = renderer;
     device_descriptor: WGPUDeviceDescriptor = .{};
     gpu.wgpuAdapterRequestDevice(renderer.adapter, *device_descriptor, device_info);
+    while !renderer.device {
+        gpu.wgpuInstanceProcessEvents(renderer.instance);
+    }
     if !renderer.device return;
     renderer.queue = gpu.wgpuDeviceGetQueue(renderer.device);
 

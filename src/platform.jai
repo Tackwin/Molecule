@@ -70,6 +70,7 @@ WebGPU_Api :: struct {
     // These names intentionally match the WebGPU C API. The platform owns their implementation.
     wgpuCreateInstance: WGPUProcCreateInstance = null;
     wgpuInstanceCreateSurface: WGPUProcInstanceCreateSurface = null;
+    wgpuInstanceProcessEvents: WGPUProcInstanceProcessEvents = null;
     wgpuInstanceRequestAdapter: WGPUProcInstanceRequestAdapter = null;
     wgpuAdapterRequestDevice: WGPUProcAdapterRequestDevice = null;
     wgpuDeviceGetQueue: WGPUProcDeviceGetQueue = null;

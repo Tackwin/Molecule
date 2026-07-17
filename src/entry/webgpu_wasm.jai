@@ -26,6 +26,9 @@ wasm_wgpuInstanceCreateSurface :: (
     return result;
 }
 
+wasm_wgpuInstanceProcessEvents :: (instance: WGPUInstance) #c_call {
+}
+
 wasm_wgpuInstanceRequestAdapter :: (
     instance: WGPUInstance, options: *WGPURequestAdapterOptions,
     callback_info: WGPURequestAdapterCallbackInfo
@@ -235,6 +238,7 @@ wasm_wgpuSurfacePresent :: (surface: WGPUSurface) -> WGPUStatus #c_call {
 install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuCreateInstance = wasm_wgpuCreateInstance;
     gpu.wgpuInstanceCreateSurface = wasm_wgpuInstanceCreateSurface;
+    gpu.wgpuInstanceProcessEvents = wasm_wgpuInstanceProcessEvents;
     gpu.wgpuInstanceRequestAdapter = wasm_wgpuInstanceRequestAdapter;
     gpu.wgpuAdapterRequestDevice = wasm_wgpuAdapterRequestDevice;
     gpu.wgpuDeviceGetQueue = wasm_wgpuDeviceGetQueue;

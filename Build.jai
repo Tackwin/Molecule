@@ -1,5 +1,6 @@
 #import "Compiler";
 #import "Basic";
+#import "File_Utilities";
 #import "String";
 
 configure_common :: (workspace: Workspace) {
@@ -30,8 +31,24 @@ build_win32 :: () {
     options := get_build_options(workspace);
     options.output_type = .EXECUTABLE;
     options.output_executable_name = "Molecule";
+    options.additional_linker_arguments = .[
+        "IceEscapeReference/lib/wgpu_native.lib",
+        "User32.lib",
+        "Userenv.lib",
+        "Ntdll.lib",
+        "Propsys.lib",
+        "OpenGL32.lib",
+        "Ole32.lib",
+        "Gdi32.lib",
+        "OleAut32.lib",
+        "d3dcompiler.lib",
+        "RuntimeObject.lib",
+        "Ws2_32.lib"
+    ];
     set_build_options(options, workspace);
     compile_workspace(workspace, "src/entry/win32.jai");
+    copy_file("IceEscapeReference/bin/wgpu_native.dll", "build/wgpu_native.dll");
+    copy_file("IceEscapeReference/bin/SDL2.dll", "build/SDL2.dll");
 }
 
 build_wasm :: () {

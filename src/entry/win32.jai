@@ -2,6 +2,8 @@
 #import "SDL";
 #import "platform";
 #import "game";
+#import "renderer";
+#load "webgpu_win32.jai";
 
 platform_quit_requested := false;
 
@@ -67,13 +69,17 @@ main :: () {
     defer SDL_DestroyWindow(window);
 
     platform := make_win32_platform();
+    install_win32_webgpu(*platform.gpu, window);
     game: Game_State;
     game_init(*game, 0x4d6f6c6563756c65);
+    renderer: Renderer;
+    renderer_init(*renderer, *platform, 1280, 720);
 
     input: Frame_Input;
     while !platform_quit_requested {
         poll_win32_input(window, *input);
         game_tick(*game, *input, *platform);
+        renderer_draw(*renderer, *platform);
         if input.wants_quit platform_quit_requested = true;
         SDL_Delay(1);
     }

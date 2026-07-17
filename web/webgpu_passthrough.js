@@ -594,6 +594,10 @@ jai_imports.js_memory_grew = () => {
 	data_view = new DataView(jai_exports.memory.buffer);
 }
 
+const webgpu_early_return = (function_name, reason) => {
+	console.error(`WebGPU passthrough ${function_name}: ${reason}`);
+}
+
 jai_imports.jsCreateInstance = (params_ptr, returns_ptr) => {
 	data_view = new DataView(jai_exports.memory.buffer);
 	object_map_counter += 1;
@@ -804,9 +808,14 @@ jai_imports.jsAdapterRequestDevice = new WebAssembly.Suspending(async (params_pt
 	const adapter_idx = getU64(params_ptr, 0);
 	const descriptor_ptr = getU64(params_ptr, 8);
 	if (adapter_idx == 0 || descriptor_ptr == 0) {
+		webgpu_early_return("wgpuAdapterRequestDevice", "adapter or descriptor is null");
 		return;
 	}
 	const adapter = object_map[adapter_idx];
+	if (!adapter) {
+		webgpu_early_return("wgpuAdapterRequestDevice", `unknown adapter handle ${adapter_idx}`);
+		return;
+	}
 
 	const feature_count = getU64(descriptor_ptr, 8 + 16);
 	const feature_ptr   = getU64(descriptor_ptr, 8 + 16 + 8);
@@ -867,11 +876,13 @@ jai_imports.jsAdapterRequestDevice = new WebAssembly.Suspending(async (params_pt
 jai_imports.jsDeviceGetQueue = (params_ptr, returns_ptr) => {
 	const device_idx = getU64(params_ptr, 0);
 	if (device_idx <= 0) {
+		webgpu_early_return("wgpuDeviceGetQueue", "device is null");
 		return;
 	}
 
 	const device = object_map[device_idx];
 	if (!device) {
+		webgpu_early_return("wgpuDeviceGetQueue", `unknown device handle ${device_idx}`);
 		return;
 	}
 
@@ -902,11 +913,13 @@ jai_imports.jsQueueSubmit = (params_ptr, returns_ptr) => {
 	const commandCount = getU64(params_ptr, 8);
 	const commands_ptr = getU64(params_ptr, 16);
 	if (queue_idx <= 0 || (commandCount > 0 && commands_ptr == 0)) {
+		webgpu_early_return("wgpuQueueSubmit", "queue or command list is null");
 		return;
 	}
 
 	const queue = object_map[queue_idx];
 	if (!queue) {
+		webgpu_early_return("wgpuQueueSubmit", `unknown queue handle ${queue_idx}`);
 		return;
 	}
 
@@ -916,6 +929,7 @@ jai_imports.jsQueueSubmit = (params_ptr, returns_ptr) => {
 		const command_idx = getU64(commands_ptr, i * 8);
 		const command = object_map[command_idx];
 		if (!command) {
+			webgpu_early_return("wgpuQueueSubmit", `unknown command buffer handle ${command_idx}`);
 			continue;
 		}
 		commands.push(command);
@@ -1012,11 +1026,13 @@ jai_imports.jsQueueWriteTexture = (params_ptr, returns_ptr) => {
 jai_imports.jsDeviceCreateCommandEncoder = (params_ptr, returns_ptr) => {
 	const device_idx = getU64(params_ptr, 0);
 	if (device_idx <= 0) {
+		webgpu_early_return("wgpuDeviceCreateCommandEncoder", "device is null");
 		return;
 	}
 	
 	const device = object_map[device_idx];
 	if (!device) {
+		webgpu_early_return("wgpuDeviceCreateCommandEncoder", `unknown device handle ${device_idx}`);
 		return;
 	}
 	
@@ -1036,19 +1052,21 @@ jai_imports.jsCommandEncoderFinish = (params_ptr, returns_ptr) => {
 	const encoder_idx = getU64(params_ptr, 0);
 	const descriptor_ptr = getU64(params_ptr, 8);
 
-	if (encoder_idx <= 0 || descriptor_ptr == 0) {
+	if (encoder_idx <= 0) {
+		webgpu_early_return("wgpuCommandEncoderFinish", "command encoder is null");
 		return;
 	}
 
 	const encoder = object_map[encoder_idx];
 	if (!encoder) {
+		webgpu_early_return("wgpuCommandEncoderFinish", `unknown command encoder handle ${encoder_idx}`);
 		return;
 	}
 
-	const label = getString(descriptor_ptr + 8n);
+	const label = descriptor_ptr != 0 ? getString(descriptor_ptr + 8n) : undefined;
 
 	object_map_counter += 1;
-	object_map[object_map_counter] = encoder.finish({label});
+	object_map[object_map_counter] = encoder.finish(label ? { label } : undefined);
 
 	setU64(returns_ptr, 0, object_map_counter);
 }
@@ -1187,11 +1205,13 @@ jai_imports.jsBufferUnmap = (params_ptr, returns_ptr) => {
 jai_imports.jsInstanceCreateSurface = (params_ptr, returns_ptr) => {
 	const instance_idx = getU64(params_ptr, 0);
 	if (instance_idx == 0) {
+		webgpu_early_return("wgpuInstanceCreateSurface", "instance is null");
 		return;
 	}
 
 	const instance = object_map[instance_idx];
 	if (!instance) {
+		webgpu_early_return("wgpuInstanceCreateSurface", `unknown instance handle ${instance_idx}`);
 		return;
 	}
 
@@ -1222,6 +1242,7 @@ const getSurfaceConfiguration = (ptr) => {
 
 	const device = object_map[device_idx];
 	if (!device) {
+		webgpu_early_return("getSurfaceConfiguration", `unknown device handle ${device_idx}`);
 		return null;
 	}
 
@@ -1250,16 +1271,19 @@ const getSurfaceConfiguration = (ptr) => {
 jai_imports.jsSurfaceConfigure = (params_ptr, returns_ptr) => {
 	const surface_idx = getU64(params_ptr, 0);
 	if (surface_idx <= 0) {
+		webgpu_early_return("wgpuSurfaceConfigure", "surface is null");
 		return;
 	}
 
 	const descriptor_ptr = getU64(params_ptr, 8);
 	if (descriptor_ptr == 0) {
+		webgpu_early_return("wgpuSurfaceConfigure", "configuration descriptor is null");
 		return;
 	}
 
 	const surface = object_map[surface_idx];
 	if (!surface) {
+		webgpu_early_return("wgpuSurfaceConfigure", `unknown surface handle ${surface_idx}`);
 		return;
 	}
 
@@ -1270,6 +1294,7 @@ jai_imports.jsSurfaceConfigure = (params_ptr, returns_ptr) => {
 	// Configure the context
 	const configre = getSurfaceConfiguration(descriptor_ptr);
 	if (!configre) {
+		webgpu_early_return("wgpuSurfaceConfigure", "invalid surface configuration");
 		return;
 	}
 	
@@ -1281,16 +1306,19 @@ jai_imports.jsSurfaceConfigure = (params_ptr, returns_ptr) => {
 jai_imports.jsDeviceCreateShaderModule = (params_ptr, returns_ptr) => {
 	const device_idx = getU64(params_ptr, 0);
 	if (device_idx <= 0) {
+		webgpu_early_return("wgpuDeviceCreateShaderModule", "device is null");
 		return;
 	}
 
 	const descriptor_ptr = getU64(params_ptr, 8);
 	if (descriptor_ptr == 0) {
+		webgpu_early_return("wgpuDeviceCreateShaderModule", "shader module descriptor is null");
 		return;
 	}
 
 	const device = object_map[device_idx];
 	if (!device) {
+		webgpu_early_return("wgpuDeviceCreateShaderModule", `unknown device handle ${device_idx}`);
 		return;
 	}
 
@@ -1333,6 +1361,7 @@ const getVertexState = (ptr) => {
 
 	const module = object_map[module_idx];
 	if (!module) {
+		webgpu_early_return("getVertexState", `unknown shader module handle ${module_idx}`);
 		return null;
 	}
 
@@ -1400,6 +1429,7 @@ const getFragmentState = (ptr) => {
 
 	const module = object_map[module_idx];
 	if (!module) {
+		webgpu_early_return("getFragmentState", `unknown shader module handle ${module_idx}`);
 		return null;
 	}
 
@@ -1569,16 +1599,19 @@ const getDepthStencilState = (ptr) => {
 jai_imports.jsDeviceCreateRenderPipeline = (params_ptr, returns_ptr) => {
 	const device_idx = getU64(params_ptr, 0);
 	if (device_idx <= 0) {
+		webgpu_early_return("wgpuDeviceCreateRenderPipeline", "device is null");
 		return;
 	}
 
 	const descriptor_ptr = getU64(params_ptr, 8);
 	if (descriptor_ptr == 0) {
+		webgpu_early_return("wgpuDeviceCreateRenderPipeline", "pipeline descriptor is null");
 		return;
 	}
 
 	const device = object_map[device_idx];
 	if (!device) {
+		webgpu_early_return("wgpuDeviceCreateRenderPipeline", `unknown device handle ${device_idx}`);
 		return;
 	}
 
@@ -1629,11 +1662,13 @@ const getRenderPassColorAttachment = (ptr) => {
 
 	const view = object_map[view_idx];
 	if (!view) {
+		webgpu_early_return("getRenderPassColorAttachment", `unknown texture view handle ${view_idx}`);
 		return null;
 	}
 	
 	const resolveTarget = resolveTarget_idx != 0 ? object_map[resolveTarget_idx] : undefined;
 	if (resolveTarget_idx != 0 && !resolveTarget) {
+		webgpu_early_return("getRenderPassColorAttachment", `unknown resolve target handle ${resolveTarget_idx}`);
 		return null;
 	}
 
@@ -1670,6 +1705,7 @@ const getRenderPassDepthStencilAttachment = (ptr) => {
 
 	const view = object_map[view_idx];
 	if (!view) {
+		webgpu_early_return("getRenderPassDepthStencilAttachment", `unknown texture view handle ${view_idx}`);
 		return null;
 	}
 	
@@ -1696,16 +1732,19 @@ const getRenderPassDepthStencilAttachment = (ptr) => {
 jai_imports.jsCommandEncoderBeginRenderPass = (params_ptr, returns_ptr) => {
 	const encoder_idx = getU64(params_ptr, 0);
 	if (encoder_idx <= 0) {
+		webgpu_early_return("wgpuCommandEncoderBeginRenderPass", "command encoder is null");
 		return;
 	}
 
 	const descriptor_ptr = getU64(params_ptr, 8);
 	if (descriptor_ptr == 0) {
+		webgpu_early_return("wgpuCommandEncoderBeginRenderPass", "render pass descriptor is null");
 		return;
 	}
 
 	const encoder = object_map[encoder_idx];
 	if (!encoder) {
+		webgpu_early_return("wgpuCommandEncoderBeginRenderPass", `unknown command encoder handle ${encoder_idx}`);
 		return;
 	}
 
@@ -1758,12 +1797,14 @@ jai_imports.jsRenderPassEncoderSetPipeline = (params_ptr, returns_ptr) => {
 	const pipeline_idx = getU64(params_ptr, 8);
 
 	if (pass_idx <= 0 || pipeline_idx <= 0) {
+		webgpu_early_return("wgpuRenderPassEncoderSetPipeline", "render pass or pipeline is null");
 		return;
 	}
 
 	const pass = object_map[pass_idx];
 	const pipeline = object_map[pipeline_idx];
 	if (!pass || !pipeline) {
+		webgpu_early_return("wgpuRenderPassEncoderSetPipeline", "unknown render pass or pipeline handle");
 		return;
 	}
 
@@ -1778,11 +1819,13 @@ jai_imports.jsRenderPassEncoderDraw = (params_ptr, returns_ptr) => {
 	const firstInstance = getU32(params_ptr, 20);
 
 	if (pass_idx <= 0) {
+		webgpu_early_return("wgpuRenderPassEncoderDraw", "render pass is null");
 		return;
 	}
 
 	const pass = object_map[pass_idx];
 	if (!pass ) {
+		webgpu_early_return("wgpuRenderPassEncoderDraw", `unknown render pass handle ${pass_idx}`);
 		return;
 	}
 
@@ -1812,11 +1855,13 @@ jai_imports.jsRenderPassEncoderDrawIndexed = (params_ptr, returns_ptr) => {
 jai_imports.jsRenderPassEncoderEnd = (params_ptr, returns_ptr) => {
 	const pass_idx = getU64(params_ptr, 0);
 	if (pass_idx <= 0) {
+		webgpu_early_return("wgpuRenderPassEncoderEnd", "render pass is null");
 		return;
 	}
 
 	const pass = object_map[pass_idx];
 	if (!pass) {
+		webgpu_early_return("wgpuRenderPassEncoderEnd", `unknown render pass handle ${pass_idx}`);
 		return;
 	}
 
@@ -1826,16 +1871,19 @@ jai_imports.jsRenderPassEncoderEnd = (params_ptr, returns_ptr) => {
 jai_imports.jsSurfaceGetCurrentTexture = (params_ptr, returns_ptr) => {
 	const surface_idx = getU64(params_ptr, 0);
 	if (surface_idx <= 0) {
+		webgpu_early_return("wgpuSurfaceGetCurrentTexture", "surface is null");
 		return;
 	}
 	
 	const surface = object_map[surface_idx];
 	if (!surface) {
+		webgpu_early_return("wgpuSurfaceGetCurrentTexture", `unknown surface handle ${surface_idx}`);
 		return;
 	}
 
 	const texture = surface.getContext("webgpu").getCurrentTexture();
 	if (!texture) {
+		webgpu_early_return("wgpuSurfaceGetCurrentTexture", "canvas returned no current texture");
 		return;
 	}
 	
@@ -1843,7 +1891,8 @@ jai_imports.jsSurfaceGetCurrentTexture = (params_ptr, returns_ptr) => {
 	object_map[object_map_counter] = texture;
 	const texture_idx = object_map_counter;
 	
-	setU64(returns_ptr, 0, texture_idx);
+	setU64(returns_ptr, 8, texture_idx);
+	setU32(returns_ptr, 16, 1); // WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
 }
 
 const convertTextureViewDimensionToJs = (dimension) => {
@@ -1905,11 +1954,13 @@ const getTexureViewDescriptor = (ptr) => {
 jai_imports.jsTextureCreateView = (params_ptr, returns_ptr) => {
 	const texture_idx = getU64(params_ptr, 0);
 	if (texture_idx <= 0) {
+		webgpu_early_return("wgpuTextureCreateView", "texture is null");
 		return;
 	}
 
 	const texture = object_map[texture_idx];
 	if (!texture) {
+		webgpu_early_return("wgpuTextureCreateView", `unknown texture handle ${texture_idx}`);
 		return;
 	}
 	
@@ -1946,11 +1997,13 @@ jai_imports.jsRenderPassEncoderRelease = (params_ptr, returns_ptr) => {
 jai_imports.jsSurfacePresent = (params_ptr, returns_ptr) => {
 	const surface_idx = getU64(params_ptr, 0);
 	if (surface_idx <= 0) {
+		webgpu_early_return("wgpuSurfacePresent", "surface is null");
 		return;
 	}
 	
 	const surface = object_map[surface_idx];
 	if (!surface) {
+		webgpu_early_return("wgpuSurfacePresent", `unknown surface handle ${surface_idx}`);
 		return;
 	}
 
