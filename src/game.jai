@@ -1,15 +1,20 @@
 #import "Basic";
 #import "platform";
+#import "Algebra";
+#import "renderer";
 
 Game_State :: struct {
     tick_count: u64;
     deterministic_seed: u64;
     quit_requested: bool;
+    triangle_offset: V2f;
+    renderer: Renderer;
 }
 
-game_init :: (state: *Game_State, seed: u64) {
+game_init :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
     state.* = .{};
     state.deterministic_seed = seed;
+    renderer_init(*state.renderer, platform, width, height);
 }
 
 // No wall clock, file system, socket, or random service reaches the simulation.
@@ -21,6 +26,19 @@ game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
         if platform.system.request_quit platform.system.request_quit();
     }
 
-    // Rendering is intentionally separate from state mutation. A later renderer can use
-    // platform.gpu without making gameplay depend on GPU timing or results.
+    move: V2f = .{};
+    if input.keyboard.down[KEY_MOVE_UP] {
+        move.y += 1;
+    }
+    if input.keyboard.down[KEY_MOVE_LEFT] {
+        move.x -= 1;
+    }
+    if input.keyboard.down[KEY_MOVE_DOWN] {
+        move.y -= 1;
+    }
+    if input.keyboard.down[KEY_MOVE_RIGHT] {
+        move.x += 1;
+    }
+    state.triangle_offset += move * (0.75 * input.simulation_delta_seconds);
+    renderer_draw(*state.renderer, platform, state.triangle_offset);
 }

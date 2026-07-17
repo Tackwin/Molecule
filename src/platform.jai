@@ -9,6 +9,11 @@ MAX_KEYS :: 256;
 MAX_ASYNC_EVENTS :: 64;
 MAX_EVENT_BYTES :: 16 * 1024;
 
+KEY_MOVE_UP    :: 0;
+KEY_MOVE_LEFT  :: 1;
+KEY_MOVE_DOWN  :: 2;
+KEY_MOVE_RIGHT :: 3;
+
 Async_Event_Kind :: enum u8 {
     NONE;
     WEBSOCKET_MESSAGE;
@@ -74,15 +79,20 @@ WebGPU_Api :: struct {
     wgpuInstanceRequestAdapter: WGPUProcInstanceRequestAdapter = null;
     wgpuAdapterRequestDevice: WGPUProcAdapterRequestDevice = null;
     wgpuDeviceGetQueue: WGPUProcDeviceGetQueue = null;
+    wgpuDeviceCreateBuffer: WGPUProcDeviceCreateBuffer = null;
+    wgpuDeviceCreateBindGroup: WGPUProcDeviceCreateBindGroup = null;
     wgpuDeviceCreateShaderModule: WGPUProcDeviceCreateShaderModule = null;
     wgpuDeviceCreateRenderPipeline: WGPUProcDeviceCreateRenderPipeline = null;
     wgpuDeviceCreateCommandEncoder: WGPUProcDeviceCreateCommandEncoder = null;
     wgpuCommandEncoderBeginRenderPass: WGPUProcCommandEncoderBeginRenderPass = null;
     wgpuCommandEncoderFinish: WGPUProcCommandEncoderFinish = null;
     wgpuRenderPassEncoderSetPipeline: WGPUProcRenderPassEncoderSetPipeline = null;
+    wgpuRenderPassEncoderSetBindGroup: WGPUProcRenderPassEncoderSetBindGroup = null;
     wgpuRenderPassEncoderDraw: WGPUProcRenderPassEncoderDraw = null;
     wgpuRenderPassEncoderEnd: WGPUProcRenderPassEncoderEnd = null;
     wgpuQueueSubmit: WGPUProcQueueSubmit = null;
+    wgpuQueueWriteBuffer: WGPUProcQueueWriteBuffer = null;
+    wgpuRenderPipelineGetBindGroupLayout: WGPUProcRenderPipelineGetBindGroupLayout = null;
     wgpuSurfaceConfigure: WGPUProcSurfaceConfigure = null;
     wgpuSurfaceGetCurrentTexture: WGPUProcSurfaceGetCurrentTexture = null;
     wgpuSurfacePresent: WGPUProcSurfacePresent = null;

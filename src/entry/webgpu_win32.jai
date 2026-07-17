@@ -9,6 +9,8 @@ wgpuInstanceProcessEvents :: (i: WGPUInstance) #foreign wgpu_native;
 wgpuInstanceRequestAdapter :: (i: WGPUInstance, o: *WGPURequestAdapterOptions, c: WGPURequestAdapterCallbackInfo) -> WGPUFuture #foreign wgpu_native;
 wgpuAdapterRequestDevice :: (a: WGPUAdapter, d: *WGPUDeviceDescriptor, c: WGPURequestDeviceCallbackInfo) -> WGPUFuture #foreign wgpu_native;
 wgpuDeviceGetQueue :: (d: WGPUDevice) -> WGPUQueue #foreign wgpu_native;
+wgpuDeviceCreateBuffer :: (d: WGPUDevice, x: *WGPUBufferDescriptor) -> WGPUBuffer #foreign wgpu_native;
+wgpuDeviceCreateBindGroup :: (d: WGPUDevice, x: *WGPUBindGroupDescriptor) -> WGPUBindGroup #foreign wgpu_native;
 wgpuDeviceCreateShaderModule :: (d: WGPUDevice, x: *WGPUShaderModuleDescriptor) -> WGPUShaderModule #foreign wgpu_native;
 wgpuDeviceCreateRenderPipeline :: (d: WGPUDevice, x: *WGPURenderPipelineDescriptor) -> WGPURenderPipeline #foreign wgpu_native;
 wgpuSurfaceConfigure :: (s: WGPUSurface, c: *WGPUSurfaceConfiguration) #foreign wgpu_native;
@@ -17,10 +19,13 @@ wgpuTextureCreateView :: (t: WGPUTexture, d: *WGPUTextureViewDescriptor) -> WGPU
 wgpuDeviceCreateCommandEncoder :: (d: WGPUDevice, x: *WGPUCommandEncoderDescriptor) -> WGPUCommandEncoder #foreign wgpu_native;
 wgpuCommandEncoderBeginRenderPass :: (e: WGPUCommandEncoder, d: *WGPURenderPassDescriptor) -> WGPURenderPassEncoder #foreign wgpu_native;
 wgpuRenderPassEncoderSetPipeline :: (p: WGPURenderPassEncoder, x: WGPURenderPipeline) #foreign wgpu_native;
+wgpuRenderPassEncoderSetBindGroup :: (p: WGPURenderPassEncoder, i: u32, g: WGPUBindGroup, c: u64, o: *u32) #foreign wgpu_native;
 wgpuRenderPassEncoderDraw :: (p: WGPURenderPassEncoder, v: u32, n: u32, f: u32, i: u32) #foreign wgpu_native;
 wgpuRenderPassEncoderEnd :: (p: WGPURenderPassEncoder) #foreign wgpu_native;
 wgpuCommandEncoderFinish :: (e: WGPUCommandEncoder, d: *WGPUCommandBufferDescriptor) -> WGPUCommandBuffer #foreign wgpu_native;
 wgpuQueueSubmit :: (q: WGPUQueue, n: u64, c: *WGPUCommandBuffer) #foreign wgpu_native;
+wgpuQueueWriteBuffer :: (q: WGPUQueue, b: WGPUBuffer, o: u64, d: *void, s: u64) #foreign wgpu_native;
+wgpuRenderPipelineGetBindGroupLayout :: (p: WGPURenderPipeline, i: u32) -> WGPUBindGroupLayout #foreign wgpu_native;
 wgpuSurfacePresent :: (s: WGPUSurface) -> WGPUStatus #foreign wgpu_native;
 
 win32_wgpuInstanceCreateSurface :: (instance: WGPUInstance, descriptor: *WGPUSurfaceDescriptor) -> WGPUSurface #c_call {
@@ -52,6 +57,8 @@ install_win32_webgpu :: (gpu: *WebGPU_Api, window: *SDL_Window) {
     gpu.wgpuInstanceRequestAdapter = wgpuInstanceRequestAdapter;
     gpu.wgpuAdapterRequestDevice = wgpuAdapterRequestDevice;
     gpu.wgpuDeviceGetQueue = wgpuDeviceGetQueue;
+    gpu.wgpuDeviceCreateBuffer = wgpuDeviceCreateBuffer;
+    gpu.wgpuDeviceCreateBindGroup = wgpuDeviceCreateBindGroup;
     gpu.wgpuDeviceCreateShaderModule = wgpuDeviceCreateShaderModule;
     gpu.wgpuDeviceCreateRenderPipeline = wgpuDeviceCreateRenderPipeline;
     gpu.wgpuSurfaceConfigure = wgpuSurfaceConfigure;
@@ -60,9 +67,12 @@ install_win32_webgpu :: (gpu: *WebGPU_Api, window: *SDL_Window) {
     gpu.wgpuDeviceCreateCommandEncoder = wgpuDeviceCreateCommandEncoder;
     gpu.wgpuCommandEncoderBeginRenderPass = wgpuCommandEncoderBeginRenderPass;
     gpu.wgpuRenderPassEncoderSetPipeline = wgpuRenderPassEncoderSetPipeline;
+    gpu.wgpuRenderPassEncoderSetBindGroup = wgpuRenderPassEncoderSetBindGroup;
     gpu.wgpuRenderPassEncoderDraw = wgpuRenderPassEncoderDraw;
     gpu.wgpuRenderPassEncoderEnd = wgpuRenderPassEncoderEnd;
     gpu.wgpuCommandEncoderFinish = wgpuCommandEncoderFinish;
     gpu.wgpuQueueSubmit = wgpuQueueSubmit;
+    gpu.wgpuQueueWriteBuffer = wgpuQueueWriteBuffer;
+    gpu.wgpuRenderPipelineGetBindGroupLayout = wgpuRenderPipelineGetBindGroupLayout;
     gpu.wgpuSurfacePresent = wgpuSurfacePresent;
 }
