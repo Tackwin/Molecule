@@ -16,6 +16,9 @@ backend step. The browser bootstrap owns a canvas and schedules frames; it
 passes platform-collected frame data through a narrow WASM ABI before calling
 `wasm_frame`.
 
+The browser WebGPU bridge uses JSPI: JavaScript is restricted to passing WebGPU
+calls through to the browser, while Jai owns renderer setup and draw commands.
+
 To serve the browser build locally, run `python web/server.py` and open
 `http://localhost:8000/`.
 

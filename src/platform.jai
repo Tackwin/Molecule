@@ -1,5 +1,6 @@
 #import "Basic";
 #import "Algebra";
+#load "webgpu_wgpu.jai";
 
 // This file is the only boundary the game is allowed to use for host services.
 // Frame_Input is value data: it can be copied verbatim into a replay stream.
@@ -65,49 +66,30 @@ Frame_Input :: struct {
     async_events: [] Async_Event; // Allocated from the current frame arena.
 }
 
-// Opaque identifiers make handles host-owned and replay-independent.
-Gpu_Handle :: u32;
-Gpu_Invalid: Gpu_Handle : 0;
-
-Gpu_Frame :: struct {
-    surface_texture: Gpu_Handle;
-    surface_view: Gpu_Handle;
-    width: u32;
-    height: u32;
-    valid: bool;
-}
-
 WebGPU_Api :: struct {
-    // Resource creation/destruction.
-    wgpuDeviceCreateBuffer: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreateTexture: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreateSampler: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreateShaderModule: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreateBindGroupLayout: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreateBindGroup: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreatePipelineLayout: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuDeviceCreateRenderPipeline: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuBufferRelease: #type (buffer: Gpu_Handle) = null;
-    wgpuTextureRelease: #type (texture: Gpu_Handle) = null;
-    wgpuRenderPipelineRelease: #type (pipeline: Gpu_Handle) = null;
-
-    // Queue and command encoding.
-    wgpuQueueWriteBuffer: #type (queue: Gpu_Handle, buffer: Gpu_Handle, offset: u64, data: [] u8) = null;
-    wgpuDeviceCreateCommandEncoder: #type (device: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuCommandEncoderBeginRenderPass: #type (encoder: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuRenderPassEncoderSetPipeline: #type (pass: Gpu_Handle, pipeline: Gpu_Handle) = null;
-    wgpuRenderPassEncoderSetBindGroup: #type (pass: Gpu_Handle, slot: u32, group: Gpu_Handle) = null;
-    wgpuRenderPassEncoderSetVertexBuffer: #type (pass: Gpu_Handle, slot: u32, buffer: Gpu_Handle) = null;
-    wgpuRenderPassEncoderSetIndexBuffer: #type (pass: Gpu_Handle, buffer: Gpu_Handle) = null;
-    wgpuRenderPassEncoderDraw: #type (pass: Gpu_Handle, vertex_count: u32, instance_count: u32) = null;
-    wgpuRenderPassEncoderDrawIndexed: #type (pass: Gpu_Handle, index_count: u32, instance_count: u32) = null;
-    wgpuRenderPassEncoderEnd: #type (pass: Gpu_Handle) = null;
-    wgpuCommandEncoderFinish: #type (encoder: Gpu_Handle, descriptor_bytes: [] u8) -> Gpu_Handle = null;
-    wgpuQueueSubmit: #type (queue: Gpu_Handle, command_buffers: [] Gpu_Handle) = null;
-
-    // Presentation belongs to the host; the game only renders into this frame.
-    wgpuSurfaceGetCurrentTexture: #type (surface: Gpu_Handle) -> Gpu_Frame = null;
-    wgpuSurfacePresent: #type (surface: Gpu_Handle) = null;
+    // These names intentionally match the WebGPU C API. The platform owns their implementation.
+    wgpuCreateInstance: WGPUProcCreateInstance = null;
+    wgpuInstanceCreateSurface: WGPUProcInstanceCreateSurface = null;
+    wgpuInstanceRequestAdapter: WGPUProcInstanceRequestAdapter = null;
+    wgpuAdapterRequestDevice: WGPUProcAdapterRequestDevice = null;
+    wgpuDeviceGetQueue: WGPUProcDeviceGetQueue = null;
+    wgpuDeviceCreateShaderModule: WGPUProcDeviceCreateShaderModule = null;
+    wgpuDeviceCreateRenderPipeline: WGPUProcDeviceCreateRenderPipeline = null;
+    wgpuDeviceCreateCommandEncoder: WGPUProcDeviceCreateCommandEncoder = null;
+    wgpuCommandEncoderBeginRenderPass: WGPUProcCommandEncoderBeginRenderPass = null;
+    wgpuCommandEncoderFinish: WGPUProcCommandEncoderFinish = null;
+    wgpuRenderPassEncoderSetPipeline: WGPUProcRenderPassEncoderSetPipeline = null;
+    wgpuRenderPassEncoderDraw: WGPUProcRenderPassEncoderDraw = null;
+    wgpuRenderPassEncoderEnd: WGPUProcRenderPassEncoderEnd = null;
+    wgpuQueueSubmit: WGPUProcQueueSubmit = null;
+    wgpuSurfaceConfigure: WGPUProcSurfaceConfigure = null;
+    wgpuSurfaceGetCurrentTexture: WGPUProcSurfaceGetCurrentTexture = null;
+    wgpuSurfacePresent: WGPUProcSurfacePresent = null;
+    wgpuTextureCreateView: WGPUProcTextureCreateView = null;
+    wgpuTextureViewRelease: WGPUProcTextureViewRelease = null;
+    wgpuRenderPassEncoderRelease: WGPUProcRenderPassEncoderRelease = null;
+    wgpuCommandEncoderRelease: WGPUProcCommandEncoderRelease = null;
+    wgpuCommandBufferRelease: WGPUProcCommandBufferRelease = null;
 }
 
 Platform_System_Api :: struct {

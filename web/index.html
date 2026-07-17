@@ -7,5 +7,10 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>html,body,canvas{margin:0;width:100%;height:100%;overflow:hidden;background:#111}canvas{display:block}</style>
 </head>
-<body><canvas id="game"></canvas><script type="module" src="main.js"></script></body>
+<body>
+  <canvas id="game"></canvas>
+  <script src="wasm_runtime.js"></script>
+  <script src="webgpu_passthrough.js"></script>
+  <script src="main.js"></script>
+</body>
 </html>
