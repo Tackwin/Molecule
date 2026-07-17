@@ -12,7 +12,9 @@ async function boot() {
   addEventListener("resize", resizeCanvas);
 
   // Jai currently emits wasm64; its imported memory therefore uses 64-bit addresses.
-  const memory = new WebAssembly.Memory({ initial: 256n, maximum: 256n, shared: true, address: "i64" });
+  // Keep these limits in sync with the current linker output (18 64 KiB pages).
+  // Imported shared memory must not declare a larger maximum than the WASM module.
+  const memory = new WebAssembly.Memory({ initial: 18n, maximum: 18n, shared: true, address: "i64" });
   const imports = { env: new Proxy({ memory }, { get: (target, name) => target[name] ?? (() => 0) }) };
   const response = await fetch("molecule.wasm");
   const { instance } = await WebAssembly.instantiateStreaming(response, imports);

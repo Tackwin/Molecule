@@ -11,9 +11,13 @@ jai Build.jai - win32
 jai Build.jai - wasm
 ```
 
-The Win32 bootstrap is deliberately headless until the native WebGPU/window
-backend is selected. The browser bootstrap owns a canvas and schedules frames;
-it writes the complete input record into WASM before calling `wasm_frame`.
+The Win32 bootstrap opens an SDL window; native WebGPU presentation is the next
+backend step. The browser bootstrap owns a canvas and schedules frames; it
+passes platform-collected frame data through a narrow WASM ABI before calling
+`wasm_frame`.
+
+To serve the browser build locally, run `python web/server.py` and open
+`http://localhost:8000/`.
 
 The reference project remains in `IceEscapeReference/` and is intentionally not
 part of either build.
