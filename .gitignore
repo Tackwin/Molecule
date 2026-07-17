@@ -1,0 +1,7 @@
+# Local compiler and native build products.
+.build/
+build/*
+!build/.gitkeep
+
+# The prior game is kept locally as read-only implementation reference.
+IceEscapeReference/
