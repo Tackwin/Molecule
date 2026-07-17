@@ -583,9 +583,11 @@ const setU64 = (ptr, offset, value) => {
 const getString = (stringview_ptr) => {
 	const data = getU64(stringview_ptr, 0);
 	const length = getU64(stringview_ptr, 8);
-	return new TextDecoder().decode(
-		new Uint8Array(jai_exports.memory.buffer, Number(data), Number(length))
-	);
+	// TextDecoder rejects views backed by SharedArrayBuffer. Jai's WASM memory is
+	// shared for JSPI, so decode a small ordinary copy of the requested UTF-8 bytes.
+	const shared_bytes = new Uint8Array(jai_exports.memory.buffer, Number(data), Number(length));
+	const bytes = new Uint8Array(shared_bytes);
+	return new TextDecoder().decode(bytes);
 }
 
 jai_imports.js_memory_grew = () => {
@@ -601,6 +603,11 @@ jai_imports.jsCreateInstance = (params_ptr, returns_ptr) => {
 
 jai_imports.jsInstanceRequestAdapter = new WebAssembly.Suspending(async (params_ptr, returns_ptr) => {
 	const adapter = await navigator.gpu.requestAdapter();
+	if (!adapter) {
+		console.warn("No WebGPU adapter is available.");
+		setU64(returns_ptr, 0, 0);
+		return;
+	}
 	object_map_counter += 1;
 	object_map[object_map_counter] = adapter;
 	setU64(returns_ptr, 0, object_map_counter);
@@ -1188,13 +1195,14 @@ jai_imports.jsInstanceCreateSurface = (params_ptr, returns_ptr) => {
 		return;
 	}
 
+	const canvas = document.querySelector("#game");
+	if (!canvas) {
+		console.error("Molecule WebGPU surface requested before #game canvas exists.");
+		return;
+	}
+
 	object_map_counter += 1;
-	object_map[object_map_counter] = document.createElement('canvas');
-	object_map[object_map_counter].width = 1366;
-	object_map[object_map_counter].height = 768;
-	const canvas = object_map[object_map_counter];
-	canvas.id = "webgpu-canvas";
-	document.body.appendChild(canvas);
+	object_map[object_map_counter] = canvas;
 
 	setU64(returns_ptr, 0, object_map_counter);
 }

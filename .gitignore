@@ -5,3 +5,7 @@ build/*
 
 # The prior game is kept locally as read-only implementation reference.
 IceEscapeReference/
+
+# Local browser runtime harness dependencies and output.
+node_modules/
+web/runtime-check.png
