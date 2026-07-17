@@ -1,11 +1,98 @@
 #import "Basic";
 #import "SDL";
+#import "File";
+#import "Windows";
 #import "platform";
 #import "game";
 #import "renderer";
 #load "webgpu_win32.jai";
 
 platform_quit_requested := false;
+win32_asset_blob: [] u8;
+
+win32_try_get_asset_blob :: () -> [] u8 {
+    return win32_asset_blob;
+}
+
+Win32_Asset_Request :: struct {
+    data: string;
+    status: Asset_Request_Status;
+}
+
+win32_asset_requests: [64] Win32_Asset_Request;
+
+win32_asset_request_async :: (path: [] u8) -> Asset_Request_Handle {
+    for 1..win32_asset_requests.count - 1 {
+        request := *win32_asset_requests[it];
+        if request.status.state == .EMPTY {
+            path_string: string = .{ data = path.data, count = path.count };
+            data, loaded := read_entire_file(tprint("Assets/%", path_string), log_errors = false);
+            request.data = data;
+            if loaded {
+                request.status.state = .READY;
+                request.status.bytes_received = xx request.data.count;
+                request.status.bytes_total = xx request.data.count;
+            } else {
+                request.status.state = .FAILED;
+                request.status.error_code = 2;
+            }
+            return xx it;
+        }
+    }
+    return 0;
+}
+
+win32_asset_get_status :: (handle: Asset_Request_Handle) -> Asset_Request_Status {
+    if handle == 0 || handle >= win32_asset_requests.count return .{ state = .FAILED, error_code = 1 };
+    return win32_asset_requests[handle].status;
+}
+
+win32_asset_take :: (handle: Asset_Request_Handle, allocator: Allocator) -> [] u8 {
+    if handle == 0 || handle >= win32_asset_requests.count return .{};
+    request := *win32_asset_requests[handle];
+    if request.status.state != .READY return .{};
+    result: [] u8;
+    result.count = request.data.count;
+    ctx: #Context;
+    push_context ctx {
+        context.allocator = allocator;
+        result.data = alloc(result.count);
+    }
+    memcpy(result.data, request.data.data, result.count);
+    free(request.data.data);
+    request.* = .{};
+    return result;
+}
+
+Win32_Asset_Blob :: struct {
+    file: File;
+    mapping: HANDLE;
+    data: [] u8;
+}
+
+win32_map_asset_blob :: () -> Win32_Asset_Blob, bool {
+    blob_file, file_loaded := file_open("assets.blob", log_errors = true);
+    if !file_loaded {
+        return .{}, false;
+    }
+    size: LARGE_INTEGER;
+    if !GetFileSizeEx(blob_file.handle, *size) {
+        file_close(*blob_file);
+        return .{}, false;
+    }
+    mapping := CreateFileMappingW(blob_file.handle, null, PAGE_READONLY, 0, 0, null);
+    if !mapping {
+        file_close(*blob_file);
+        return .{}, false;
+    }
+    memory := MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, xx size.QuadPart);
+    if !memory {
+        CloseHandle(mapping);
+        file_close(*blob_file);
+        return .{}, false;
+    }
+    return .{ file = blob_file, mapping = mapping, data = .{ data = xx memory, count = size.QuadPart } }, true;
+}
 
 win32_request_quit :: () { platform_quit_requested = true; }
 
@@ -34,6 +121,10 @@ win32_set_movement_key :: (input: *Frame_Input, key: SDL_Keycode, is_down: bool,
 make_win32_platform :: () -> Platform {
     platform: Platform;
     platform.system.request_quit = win32_request_quit;
+    platform.system.try_get_asset_blob = win32_try_get_asset_blob;
+    platform.system.asset_request_async = win32_asset_request_async;
+    platform.system.asset_get_status = win32_asset_get_status;
+    platform.system.asset_take = win32_asset_take;
     return platform;
 }
 
@@ -95,6 +186,12 @@ main :: () {
 
     platform := make_win32_platform();
     install_win32_webgpu(*platform.gpu, window);
+    asset_blob, asset_blob_loaded := win32_map_asset_blob();
+    if !asset_blob_loaded return;
+    win32_asset_blob = asset_blob.data;
+    defer UnmapViewOfFile(asset_blob.data.data);
+    defer CloseHandle(asset_blob.mapping);
+    defer file_close(*asset_blob.file);
     game: Game_State;
     game_init(*game, *platform, 0x4d6f6c6563756c65, 1280, 720);
 

@@ -2,6 +2,7 @@
 #import "platform";
 #import "Algebra";
 #import "renderer";
+#import "Store";
 
 Game_State :: struct {
     tick_count: u64;
@@ -9,12 +10,15 @@ Game_State :: struct {
     quit_requested: bool;
     triangle_offset: V2f;
     renderer: Renderer;
+    store: Store;
 }
 
 game_init :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
     state.* = .{};
     state.deterministic_seed = seed;
-    renderer_init(*state.renderer, platform, width, height);
+    store_init(*state.store);
+    store_load_platform_blob(*state.store, platform);
+    renderer_init(*state.renderer, platform, width, height, state.store.triangle_shader.asset.bytes);
 }
 
 // No wall clock, file system, socket, or random service reaches the simulation.

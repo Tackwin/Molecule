@@ -1,7 +1,49 @@
 #import "Compiler";
 #import "Basic";
 #import "File_Utilities";
+#import "File";
 #import "String";
+
+Asset_Blob_Header :: struct {
+    magic: [8] u8;
+    version: u32;
+    file_count: u32;
+}
+
+Asset_Blob_Entry :: struct {
+    path_bytes: u32;
+    data_bytes: u32;
+}
+
+build_assets_blob :: () {
+    files := file_list("Assets", recursive = true);
+    output, success := file_open("build/assets.blob", for_writing = true, keep_existing_content = false);
+    if !success return;
+    defer file_close(*output);
+    header: Asset_Blob_Header = .{};
+    header.magic[0] = 77;
+    header.magic[1] = 79;
+    header.magic[2] = 76;
+    header.magic[3] = 65;
+    header.magic[4] = 83;
+    header.magic[5] = 83;
+    header.magic[6] = 69;
+    header.magic[7] = 84;
+    header.version = 1;
+    header.file_count = xx files.count;
+    file_write(*output, *header, size_of(Asset_Blob_Header));
+    for files {
+        data, data_success := read_entire_file(it, log_errors = true);
+        if !data_success continue;
+        relative_path := advance(it, "Assets/".count);
+        entry: Asset_Blob_Entry;
+        entry.path_bytes = xx relative_path.count;
+        entry.data_bytes = xx data.count;
+        file_write(*output, *entry, size_of(Asset_Blob_Entry));
+        file_write(*output, relative_path.data, relative_path.count);
+        file_write(*output, data.data, data.count);
+    }
+}
 
 configure_common :: (workspace: Workspace) {
     options := get_build_options(workspace);
@@ -10,6 +52,7 @@ configure_common :: (workspace: Workspace) {
     paths: [..] string;
     paths.allocator = temp;
     array_add(*paths, "./src/");
+    array_add(*paths, "./JaiStd/modules/");
     array_add(*paths, ..options.import_path);
     options.import_path = paths;
     set_build_options(options, workspace);
@@ -26,6 +69,7 @@ compile_workspace :: (workspace: Workspace, entry_file: string) {
 }
 
 build_win32 :: () {
+    build_assets_blob();
     workspace := compiler_create_workspace("Molecule Win32");
     configure_common(workspace);
     options := get_build_options(workspace);

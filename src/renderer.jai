@@ -13,8 +13,6 @@ Renderer :: struct {
     ready: bool;
 }
 
-triangle_wgsl: string = "struct O { @builtin(position) p: vec4f, @location(0) c: vec3f, } @group(0) @binding(0) var<uniform> offset: vec2f; @vertex fn vs(@builtin(vertex_index) i: u32) -> O { let p = array<vec2f, 3>(vec2f(0.0, 0.65), vec2f(-0.65, -0.65), vec2f(0.65, -0.65)); let c = array<vec3f, 3>(vec3f(1.0, 0.25, 0.2), vec3f(0.2, 1.0, 0.45), vec3f(0.25, 0.55, 1.0)); var o: O; o.p = vec4f(p[i] + offset, 0.0, 1.0); o.c = c[i]; return o; } @fragment fn fs(i: O) -> @location(0) vec4f { return vec4f(i.c, 1.0); }";
-
 to_wgpu_string :: (text: string) -> WGPUStringView {
     return .{ data = xx text.data, length = xx text.count };
 }
@@ -35,7 +33,7 @@ device_ready :: (
     renderer.device = device;
 }
 
-renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32) {
+renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, shader_bytes: [] u8) {
     gpu := *platform.gpu;
     renderer.instance = gpu.wgpuCreateInstance(null);
     renderer.surface = gpu.wgpuInstanceCreateSurface(renderer.instance, null);
@@ -76,7 +74,7 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
 
     source: WGPUShaderSourceWGSL = .{};
     source.chain.sType = .ShaderSourceWGSL;
-    source.code = to_wgpu_string(triangle_wgsl);
+    source.code = .{ data = shader_bytes.data, length = xx shader_bytes.count };
     shader_descriptor: WGPUShaderModuleDescriptor = .{};
     shader_descriptor.nextInChain = *source.chain;
     shader := gpu.wgpuDeviceCreateShaderModule(renderer.device, *shader_descriptor);

@@ -28,6 +28,22 @@ Async_Event :: struct {
     source: u32;
 }
 
+Asset_Request_Handle :: u32;
+
+Asset_Request_State :: enum u8 {
+    EMPTY;
+    PENDING;
+    READY;
+    FAILED;
+}
+
+Asset_Request_Status :: struct {
+    state: Asset_Request_State;
+    bytes_received: u64;
+    bytes_total: u64;
+    error_code: u32;
+}
+
 // Hosts allocate all variable-size frame data from this bump arena and reset it before
 // building the next Frame_Input. The game may read this memory for the current call only.
 // A recorder copies the arena bytes plus the input's slice offsets into its own format.
@@ -106,6 +122,10 @@ WebGPU_Api :: struct {
 Platform_System_Api :: struct {
     log: #type (text: [] u8) = null;
     request_quit: #type () = null;
+    try_get_asset_blob: #type () -> [] u8 = null;
+    asset_request_async: #type (path: [] u8) -> Asset_Request_Handle = null;
+    asset_get_status: #type (handle: Asset_Request_Handle) -> Asset_Request_Status = null;
+    asset_take: #type (handle: Asset_Request_Handle, allocator: Allocator) -> [] u8 = null;
     read_file_async: #type (path: [] u8, request_id: u32) = null;
     send_websocket: #type (data: [] u8, destination: u32) = null;
 }
