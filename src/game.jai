@@ -83,7 +83,7 @@ Game_State :: struct {
     capture_qoi: [..] u8;
 }
 
-game_init :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
+game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
     state.* = .{};
     state.deterministic_seed = seed;
     camera_init(*state.camera);
@@ -91,10 +91,21 @@ game_init :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, he
         state.water_molecules[it].lane = cast(s32) (it % GRID_ROWS);
         state.water_molecules[it].start_offset = cast(float32) (it / GRID_ROWS) * 9.0;
     }
-    store_init(*state.store);
+    store_init(*state.store, platform);
     store_load_platform_blob(*state.store, platform);
     renderer_init(*state.renderer, platform, width, height, *state.store.geometry_shader);
     store_upload_gpu_assets(*state.store, *state.renderer, platform);
+}
+
+game_reload :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
+    // All persistent state was allocated while the DLL ran under a remapped launcher Context.
+    // Its arrays and Pool therefore retain launcher-owned allocator procedures across reloads.
+    // Keep the Store, renderer, capture arrays, and GPU handles intact.
+}
+
+game_unload :: (state: *Game_State, platform: *Platform) {
+    // Reload is not shutdown. The launcher owns state memory and all persistent GPU objects.
+    // This hook exists for future rebinding of persistent function pointers, if we add any.
 }
 
 game_grid_position :: (column: s32, row: s32) -> V3f {

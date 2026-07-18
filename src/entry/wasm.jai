@@ -1,4 +1,5 @@
 #import "Basic";
+#import "Pool";
 #import "platform";
 #import "game";
 #load "webgpu_wasm.jai";
@@ -95,8 +96,9 @@ wasm_try_get_asset_blob :: () -> [] u8 {
     push_context, defer_pop;
     install_wasm_webgpu(*wasm_platform.gpu);
     wasm_platform.system.try_get_asset_blob = wasm_try_get_asset_blob;
+    wasm_platform.system.persistent_pool_allocator_proc = pool_allocator_proc;
     wasm_install_frame_input_bridge();
-    game_init(*wasm_game, *wasm_platform, 0x4d6f6c6563756c65, 1280, 720);
+    game_start(*wasm_game, *wasm_platform, 0x4d6f6c6563756c65, 1280, 720);
     wasm_initialized = true;
 }
 

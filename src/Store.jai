@@ -39,6 +39,7 @@ Shader_Asset :: struct {
 
 Store :: struct {
     pool: Pool;
+    pool_allocator_proc: Allocator_Proc;
     geometry_shader: Shader_Asset;
     cube_mesh: Mesh_Asset;
     sphere_mesh: Mesh_Asset;
@@ -60,7 +61,7 @@ store_next_line :: (text: *string) -> string {
 
 store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
     if mesh.asset.bytes.count == 0 || mesh.vertices.count > 0 return;
-    mesh.vertices.allocator = .{ pool_allocator_proc, *store.pool };
+    mesh.vertices.allocator = .{ store.pool_allocator_proc, *store.pool };
     text: string = .{ data = mesh.asset.bytes.data, count = mesh.asset.bytes.count };
     positions: [256] V3f;
     position_count: s32 = 0;
@@ -121,7 +122,7 @@ store_update_raw_asset :: (store: *Store, asset: *Store_Asset, platform: *Platfo
         asset.request = 0;
         return;
     }
-    allocator: Allocator = .{ pool_allocator_proc, *store.pool };
+    allocator: Allocator = .{ store.pool_allocator_proc, *store.pool };
     asset.bytes = platform.system.asset_take(asset.request, allocator);
     asset.request = 0;
     if asset.bytes.count > 0 {
@@ -132,12 +133,18 @@ store_update_raw_asset :: (store: *Store, asset: *Store_Asset, platform: *Platfo
     }
 }
 
-store_init :: (store: *Store) {
+store_init :: (store: *Store, platform: *Platform) {
     store.* = .{};
     set_allocators(*store.pool);
+    store.pool_allocator_proc = platform.system.persistent_pool_allocator_proc;
     store.geometry_shader.asset.path = "shaders/triangle.wgsl";
     store.cube_mesh.asset.path = "meshes/cube.obj";
     store.sphere_mesh.asset.path = "meshes/sphere.obj";
+}
+
+store_unload :: (store: *Store) {
+    release(*store.pool);
+    store.* = .{};
 }
 
 store_load_platform_blob :: (store: *Store, platform: *Platform) {

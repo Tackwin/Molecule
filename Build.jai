@@ -68,9 +68,18 @@ compile_workspace :: (workspace: Workspace, entry_file: string) {
     compiler_end_intercept(workspace);
 }
 
-build_win32 :: () {
-    build_assets_blob();
-    workspace := compiler_create_workspace("Molecule Win32");
+build_win32_game :: () {
+    workspace := compiler_create_workspace("Molecule Win32 Game");
+    configure_common(workspace);
+    options := get_build_options(workspace);
+    options.output_type = .DYNAMIC_LIBRARY;
+    options.output_executable_name = "MoleculeGame";
+    set_build_options(options, workspace);
+    compile_workspace(workspace, "src/entry/game_win32.jai");
+}
+
+build_win32_launcher :: () {
+    workspace := compiler_create_workspace("Molecule Win32 Launcher");
     configure_common(workspace);
     options := get_build_options(workspace);
     options.output_type = .EXECUTABLE;
@@ -93,6 +102,12 @@ build_win32 :: () {
     compile_workspace(workspace, "src/entry/win32.jai");
     copy_file("IceEscapeReference/bin/wgpu_native.dll", "build/wgpu_native.dll");
     copy_file("IceEscapeReference/bin/SDL2.dll", "build/SDL2.dll");
+}
+
+build_win32 :: () {
+    build_assets_blob();
+    build_win32_game();
+    build_win32_launcher();
 }
 
 build_wasm :: () {
@@ -137,15 +152,25 @@ build :: () {
     set_build_options_dc(.{ do_output = false });
     args := get_build_options().compile_time_command_line;
     wants_win32 := false;
+    wants_win32_game := false;
+    wants_win32_launcher := false;
     wants_wasm := false;
     wants_qoi_test := false;
     for args {
         wants_win32 |= compare(it, "win32") == 0;
+        wants_win32_game |= compare(it, "win32-game") == 0;
+        wants_win32_launcher |= compare(it, "win32-launcher") == 0;
         wants_wasm |= compare(it, "wasm") == 0;
         wants_qoi_test |= compare(it, "qoi-test") == 0;
     }
-    if !wants_win32 && !wants_wasm && !wants_qoi_test wants_win32 = true;
-    if wants_win32 build_win32();
+    if !wants_win32 && !wants_win32_game && !wants_win32_launcher && !wants_wasm && !wants_qoi_test wants_win32 = true;
+    if wants_win32 {
+        build_win32();
+    } else if wants_win32_game || wants_win32_launcher {
+        build_assets_blob();
+        if wants_win32_game build_win32_game();
+        if wants_win32_launcher build_win32_launcher();
+    }
     if wants_wasm build_wasm();
     if wants_qoi_test build_qoi_test();
 }

@@ -82,6 +82,52 @@ renderer_copy_rgba :: (renderer: *Renderer, platform: *Platform, rgba: [] u8) ->
     return platform.system.capture_rgba(renderer.capture_width, renderer.capture_height, rgba);
 }
 
+renderer_unload :: (renderer: *Renderer, platform: *Platform) {
+    gpu := *platform.gpu;
+    if renderer.bind_group && gpu.wgpuBindGroupRelease {
+        gpu.wgpuBindGroupRelease(renderer.bind_group);
+    }
+    if renderer.pipeline && gpu.wgpuRenderPipelineRelease {
+        gpu.wgpuRenderPipelineRelease(renderer.pipeline);
+    }
+    if renderer.depth_view && gpu.wgpuTextureViewRelease {
+        gpu.wgpuTextureViewRelease(renderer.depth_view);
+    }
+    if renderer.depth_texture && gpu.wgpuTextureRelease {
+        gpu.wgpuTextureRelease(renderer.depth_texture);
+    }
+    if renderer.instance_buffer && gpu.wgpuBufferRelease {
+        gpu.wgpuBufferRelease(renderer.instance_buffer);
+    }
+    if renderer.geometry_buffer && gpu.wgpuBufferRelease {
+        gpu.wgpuBufferRelease(renderer.geometry_buffer);
+    }
+    if renderer.camera_buffer && gpu.wgpuBufferRelease {
+        gpu.wgpuBufferRelease(renderer.camera_buffer);
+    }
+    if renderer.surface && gpu.wgpuSurfaceUnconfigure {
+        gpu.wgpuSurfaceUnconfigure(renderer.surface);
+    }
+    if renderer.surface && gpu.wgpuSurfaceRelease {
+        gpu.wgpuSurfaceRelease(renderer.surface);
+    }
+    if renderer.queue && gpu.wgpuQueueRelease {
+        gpu.wgpuQueueRelease(renderer.queue);
+    }
+    if renderer.device && gpu.wgpuDeviceRelease {
+        gpu.wgpuDeviceRelease(renderer.device);
+    }
+    if renderer.adapter && gpu.wgpuAdapterRelease {
+        gpu.wgpuAdapterRelease(renderer.adapter);
+    }
+    if renderer.instance && gpu.wgpuInstanceRelease {
+        gpu.wgpuInstanceRelease(renderer.instance);
+    }
+    array_free(renderer.instances);
+    array_free(renderer.draw_batches);
+    renderer.* = .{};
+}
+
 renderer_resize_depth_attachment :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32) {
     if width == 0 || height == 0 {
         return;

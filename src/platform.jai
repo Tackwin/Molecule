@@ -93,14 +93,19 @@ WebGPU_Api :: struct {
     wgpuCreateInstance: WGPUProcCreateInstance = null;
     wgpuInstanceCreateSurface: WGPUProcInstanceCreateSurface = null;
     wgpuInstanceProcessEvents: WGPUProcInstanceProcessEvents = null;
+    wgpuInstanceRelease: WGPUProcInstanceRelease = null;
     wgpuInstanceRequestAdapter: WGPUProcInstanceRequestAdapter = null;
     wgpuAdapterRequestDevice: WGPUProcAdapterRequestDevice = null;
+    wgpuAdapterRelease: WGPUProcAdapterRelease = null;
     wgpuDeviceGetQueue: WGPUProcDeviceGetQueue = null;
+    wgpuDeviceRelease: WGPUProcDeviceRelease = null;
     wgpuDeviceCreateBuffer: WGPUProcDeviceCreateBuffer = null;
     wgpuDeviceCreateTexture: WGPUProcDeviceCreateTexture = null;
     wgpuDeviceCreateBindGroup: WGPUProcDeviceCreateBindGroup = null;
+    wgpuBindGroupRelease: WGPUProcBindGroupRelease = null;
     wgpuDeviceCreateShaderModule: WGPUProcDeviceCreateShaderModule = null;
     wgpuDeviceCreateRenderPipeline: WGPUProcDeviceCreateRenderPipeline = null;
+    wgpuRenderPipelineRelease: WGPUProcRenderPipelineRelease = null;
     wgpuDeviceCreateCommandEncoder: WGPUProcDeviceCreateCommandEncoder = null;
     wgpuCommandEncoderBeginRenderPass: WGPUProcCommandEncoderBeginRenderPass = null;
     wgpuCommandEncoderCopyTextureToBuffer: WGPUProcCommandEncoderCopyTextureToBuffer = null;
@@ -110,6 +115,7 @@ WebGPU_Api :: struct {
     wgpuRenderPassEncoderDraw: WGPUProcRenderPassEncoderDraw = null;
     wgpuRenderPassEncoderEnd: WGPUProcRenderPassEncoderEnd = null;
     wgpuQueueSubmit: WGPUProcQueueSubmit = null;
+    wgpuQueueRelease: WGPUProcQueueRelease = null;
     wgpuQueueWriteBuffer: WGPUProcQueueWriteBuffer = null;
     wgpuBufferMapAsync: WGPUProcBufferMapAsync = null;
     wgpuBufferGetConstMappedRange: WGPUProcBufferGetConstMappedRange = null;
@@ -117,8 +123,10 @@ WebGPU_Api :: struct {
     wgpuBufferRelease: WGPUProcBufferRelease = null;
     wgpuRenderPipelineGetBindGroupLayout: WGPUProcRenderPipelineGetBindGroupLayout = null;
     wgpuSurfaceConfigure: WGPUProcSurfaceConfigure = null;
+    wgpuSurfaceUnconfigure: WGPUProcSurfaceUnconfigure = null;
     wgpuSurfaceGetCurrentTexture: WGPUProcSurfaceGetCurrentTexture = null;
     wgpuSurfacePresent: WGPUProcSurfacePresent = null;
+    wgpuSurfaceRelease: WGPUProcSurfaceRelease = null;
     wgpuTextureCreateView: WGPUProcTextureCreateView = null;
     wgpuTextureRelease: WGPUProcTextureRelease = null;
     wgpuTextureViewRelease: WGPUProcTextureViewRelease = null;
@@ -136,6 +144,7 @@ Platform_System_Api :: struct {
     asset_request_async: #type (path: [] u8) -> Asset_Request_Handle = null;
     asset_get_status: #type (handle: Asset_Request_Handle) -> Asset_Request_Status = null;
     asset_take: #type (handle: Asset_Request_Handle, allocator: Allocator) -> [] u8 = null;
+    persistent_pool_allocator_proc: Allocator_Proc = null;
     read_file_async: #type (path: [] u8, request_id: u32) = null;
     send_websocket: #type (data: [] u8, destination: u32) = null;
 }
@@ -143,4 +152,23 @@ Platform_System_Api :: struct {
 Platform :: struct {
     system: Platform_System_Api;
     gpu: WebGPU_Api;
+}
+
+// Native Jai ABI used by the Win32 launcher to call the reloadable game DLL.
+Game_Start_Proc :: #type (
+    platform: *Platform, seed: u64, width: u32, height: u32
+) -> *void;
+Game_Reload_Proc :: #type (
+    state: *void, platform: *Platform, seed: u64, width: u32, height: u32
+);
+Game_Tick_Proc :: #type (
+    state: *void, input: *Frame_Input, platform: *Platform
+);
+Game_Unload_Proc :: #type (state: *void, platform: *Platform);
+
+Game_Dll_Api :: struct {
+    start: Game_Start_Proc;
+    reload: Game_Reload_Proc;
+    tick: Game_Tick_Proc;
+    unload: Game_Unload_Proc;
 }

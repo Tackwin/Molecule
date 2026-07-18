@@ -1,10 +1,11 @@
 #import "Basic";
 #import "SDL";
 #import "File";
+#import "File_Watcher";
+#import "Pool";
+#import "String";
 #import "Windows";
 #import "platform";
-#import "game";
-#import "renderer";
 #load "../Win32_Control.jai";
 #load "webgpu_win32.jai";
 
@@ -16,6 +17,12 @@ CreateDirectoryA :: (path: *u8, security_attributes: *void) -> BOOL #foreign ker
 
 win32_try_get_asset_blob :: () -> [] u8 {
     return win32_asset_blob;
+}
+
+win32_pool_allocator_proc :: (
+    mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, allocator_data: *void
+) -> *void {
+    return pool_allocator_proc(mode, size, old_size, old_memory, allocator_data);
 }
 
 Win32_Asset_Request :: struct {
@@ -193,6 +200,7 @@ make_win32_platform :: () -> Platform {
     platform.system.asset_request_async = win32_asset_request_async;
     platform.system.asset_get_status = win32_asset_get_status;
     platform.system.asset_take = win32_asset_take;
+    platform.system.persistent_pool_allocator_proc = win32_pool_allocator_proc;
     return platform;
 }
 
@@ -245,6 +253,96 @@ poll_win32_input :: (window: *SDL_Window, input: *Frame_Input) {
     input.framebuffer_size_pixels = input.window_size_pixels;
 }
 
+Win32_Game_Dll :: struct {
+    module: HMODULE;
+    api: Game_Dll_Api;
+}
+
+Win32_Reload_Notification :: struct {
+    requested: bool;
+}
+
+Win32_Reload_Watcher :: File_Watcher(Win32_Reload_Notification);
+
+win32_game_dll_file_changed :: (
+    watcher: *Win32_Reload_Watcher,
+    change: *File_Change,
+    notification: *Win32_Reload_Notification
+) {
+    if ends_with(change.full_path, "MoleculeGame.dll") {
+        notification.requested = true;
+    }
+}
+
+win32_get_game_dll_proc :: ($T: Type, module: HMODULE, name: string) -> T {
+    return cast(T, GetProcAddress(module, name.data));
+}
+
+win32_load_game_dll :: (dll: *Win32_Game_Dll, generation: u64) -> bool {
+    CreateDirectoryA("hot".data, null);
+    temporary_dll_path := tprint("hot/MoleculeGame_%.dll", generation);
+    if !CopyFileA("MoleculeGame.dll".data, temporary_dll_path.data, 0) {
+        return false;
+    }
+    temporary_pdb_path := tprint("hot/MoleculeGame_%.pdb", generation);
+    CopyFileA("MoleculeGame.pdb".data, temporary_pdb_path.data, 0);
+
+    module := LoadLibraryA(temporary_dll_path.data);
+    if !module {
+        return false;
+    }
+    candidate: Win32_Game_Dll = .{};
+    candidate.module = module;
+    candidate.api.start = win32_get_game_dll_proc(Game_Start_Proc, module, "game_start");
+    candidate.api.reload = win32_get_game_dll_proc(Game_Reload_Proc, module, "game_reload");
+    candidate.api.tick = win32_get_game_dll_proc(Game_Tick_Proc, module, "game_tick");
+    candidate.api.unload = win32_get_game_dll_proc(Game_Unload_Proc, module, "game_unload");
+    if !candidate.api.start || !candidate.api.reload || !candidate.api.tick || !candidate.api.unload {
+        FreeLibrary(module);
+        return false;
+    }
+    dll.* = candidate;
+    return true;
+}
+
+win32_unload_game_dll :: (dll: *Win32_Game_Dll, state: *void, platform: *Platform) {
+    if !dll.module {
+        return;
+    }
+    if state {
+        dll.api.unload(state, platform);
+    }
+    FreeLibrary(dll.module);
+    dll.* = .{};
+}
+
+win32_reload_game_dll :: (
+    active_dll: *Win32_Game_Dll,
+    state: **void,
+    platform: *Platform,
+    seed: u64,
+    width: u32,
+    height: u32,
+    generation: u64
+) -> bool {
+    candidate: Win32_Game_Dll;
+    if !win32_load_game_dll(*candidate, generation) {
+        return false;
+    }
+    if state.* {
+        win32_unload_game_dll(active_dll, state.*, platform);
+        candidate.api.reload(state.*, platform, seed, width, height);
+    } else {
+        state.* = candidate.api.start(platform, seed, width, height);
+        if !state.* {
+            FreeLibrary(candidate.module);
+            return false;
+        }
+    }
+    active_dll.* = candidate;
+    return true;
+}
+
 main :: () {
     if SDL_Init(SDL_INIT_VIDEO) != 0 return;
     defer SDL_Quit();
@@ -264,21 +362,50 @@ main :: () {
     defer UnmapViewOfFile(asset_blob.data.data);
     defer CloseHandle(asset_blob.mapping);
     defer file_close(*asset_blob.file);
-    game: Game_State;
-    game_init(*game, *platform, 0x4d6f6c6563756c65, 1280, 720);
-
     input: Frame_Input;
     control: Win32_Control;
     if !win32_control_open(*control) {
         return;
     }
     defer win32_control_shutdown(*control);
+    reload_notification: Win32_Reload_Notification;
+    reload_watcher: Win32_Reload_Watcher;
+    if !init(*reload_watcher, win32_game_dll_file_changed, *reload_notification, events_to_watch = .MODIFIED | .ADDED | .MOVED) {
+        return;
+    }
+    defer deinit(reload_watcher);
+    if !add_directories(*reload_watcher, ".") {
+        return;
+    }
+    game_dll: Win32_Game_Dll;
+    game_state: *void;
+    reload_generation: u64 = 1;
+    if !win32_reload_game_dll(*game_dll, *game_state, *platform, 0x4d6f6c6563756c65, 1280, 720, reload_generation) {
+        return;
+    }
+    reload_generation += 1;
+    defer win32_unload_game_dll(*game_dll, game_state, *platform);
     while !platform_quit_requested {
         poll_win32_input(window, *input);
         win32_control_poll(*control);
         win32_control_merge_input(*control, *input);
+        process_changes(*reload_watcher);
+        if reload_notification.requested {
+            if win32_reload_game_dll(
+                *game_dll,
+                *game_state,
+                *platform,
+                0x4d6f6c6563756c65,
+                xx input.framebuffer_size_pixels.x,
+                xx input.framebuffer_size_pixels.y,
+                reload_generation
+            ) {
+                reload_notification.requested = false;
+                reload_generation += 1;
+            }
+        }
         if !control.paused {
-            game_tick(*game, *input, *platform);
+            game_dll.api.tick(game_state, *input, *platform);
         }
         if input.wants_quit platform_quit_requested = true;
         SDL_Delay(1);
