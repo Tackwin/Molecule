@@ -1,5 +1,7 @@
+#import "Basic";
 #import "platform";
 #import "Algebra";
+#import "Qoi";
 
 Renderer :: struct {
     instance: WGPUInstance;
@@ -10,6 +12,14 @@ Renderer :: struct {
     pipeline: WGPURenderPipeline;
     offset_buffer: WGPUBuffer;
     offset_bind_group: WGPUBindGroup;
+    capture_width: u32;
+    capture_height: u32;
+    capture_enabled: bool;
+    capture_supported: bool;
+    capture_frame_index: u64;
+    capture_rgba: [..] u8;
+    capture_pixels: [..] Qoi_Pixel;
+    capture_qoi: [..] u8;
     ready: bool;
 }
 
@@ -31,6 +41,58 @@ device_ready :: (
 ) #c_call {
     renderer := userdata1.(*Renderer);
     renderer.device = device;
+}
+
+renderer_capture_start :: (renderer: *Renderer) {
+    if renderer.capture_supported {
+        renderer.capture_enabled = true;
+    }
+}
+
+renderer_capture_stop :: (renderer: *Renderer) {
+    renderer.capture_enabled = false;
+}
+
+renderer_capture_frame :: (renderer: *Renderer, platform: *Platform) {
+    if !platform.system.write_file || !platform.system.capture_rgba {
+        return;
+    }
+    pixel_count := cast(u64) renderer.capture_width * renderer.capture_height;
+    array_resize(*renderer.capture_rgba, xx (pixel_count * 4));
+    if !platform.system.capture_rgba(renderer.capture_width, renderer.capture_height, renderer.capture_rgba) {
+        return;
+    }
+    array_resize(*renderer.capture_pixels, xx pixel_count);
+    for y: 0..renderer.capture_height - 1 {
+        for x: 0..renderer.capture_width - 1 {
+            source_index := (y * renderer.capture_width + x) * 4;
+            destination_index := y * renderer.capture_width + x;
+            renderer.capture_pixels[destination_index] = .{
+                renderer.capture_rgba[source_index + 0],
+                renderer.capture_rgba[source_index + 1],
+                renderer.capture_rgba[source_index + 2],
+                renderer.capture_rgba[source_index + 3],
+            };
+        }
+    }
+
+    max_qoi_bytes := qoi_encoded_max_size(pixel_count);
+    array_resize(*renderer.capture_qoi, xx max_qoi_bytes);
+    info: Qoi_Image_Info = .{
+        width = renderer.capture_width,
+        height = renderer.capture_height,
+        channels = 4,
+        colorspace = 0,
+    };
+    qoi_bytes, encoded := qoi_encode(info, renderer.capture_pixels, renderer.capture_qoi);
+    if !encoded {
+        return;
+    }
+    renderer.capture_qoi.count = xx qoi_bytes;
+    path := tprint("captures/frame_%.qoi", renderer.capture_frame_index);
+    if platform.system.write_file(.{ data = path.data, count = path.count }, renderer.capture_qoi) {
+        renderer.capture_frame_index += 1;
+    }
 }
 
 renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, shader_bytes: [] u8) {
@@ -115,6 +177,11 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     offset_group_descriptor.entryCount = 1;
     offset_group_descriptor.entries = *offset_entry;
     renderer.offset_bind_group = gpu.wgpuDeviceCreateBindGroup(renderer.device, *offset_group_descriptor);
+    if platform.system.capture_rgba {
+        renderer.capture_width = width;
+        renderer.capture_height = height;
+        renderer.capture_supported = true;
+    }
     renderer.ready = true;
 }
 
@@ -143,4 +210,7 @@ renderer_draw :: (renderer: *Renderer, platform: *Platform, offset: V2f) {
     command := gpu.wgpuCommandEncoderFinish(encoder, null);
     gpu.wgpuQueueSubmit(renderer.queue, 1, *command);
     gpu.wgpuSurfacePresent(renderer.surface);
+    if renderer.capture_enabled {
+        renderer_capture_frame(renderer, platform);
+    }
 }

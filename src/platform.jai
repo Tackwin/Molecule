@@ -77,6 +77,12 @@ Mouse_State :: struct {
     buttons_released: u8;
 }
 
+Frame_Capture_Request :: enum u8 {
+    NONE;
+    START;
+    STOP;
+}
+
 Frame_Input :: struct {
     simulation_delta_seconds: float32;
     window_size_pixels: V2i;
@@ -84,6 +90,7 @@ Frame_Input :: struct {
     keyboard: Keyboard_State;
     mouse: Mouse_State;
     wants_quit: bool;
+    capture_request: Frame_Capture_Request;
     async_events: [] Async_Event; // Allocated from the current frame arena.
 }
 
@@ -101,6 +108,7 @@ WebGPU_Api :: struct {
     wgpuDeviceCreateRenderPipeline: WGPUProcDeviceCreateRenderPipeline = null;
     wgpuDeviceCreateCommandEncoder: WGPUProcDeviceCreateCommandEncoder = null;
     wgpuCommandEncoderBeginRenderPass: WGPUProcCommandEncoderBeginRenderPass = null;
+    wgpuCommandEncoderCopyTextureToBuffer: WGPUProcCommandEncoderCopyTextureToBuffer = null;
     wgpuCommandEncoderFinish: WGPUProcCommandEncoderFinish = null;
     wgpuRenderPassEncoderSetPipeline: WGPUProcRenderPassEncoderSetPipeline = null;
     wgpuRenderPassEncoderSetBindGroup: WGPUProcRenderPassEncoderSetBindGroup = null;
@@ -108,6 +116,10 @@ WebGPU_Api :: struct {
     wgpuRenderPassEncoderEnd: WGPUProcRenderPassEncoderEnd = null;
     wgpuQueueSubmit: WGPUProcQueueSubmit = null;
     wgpuQueueWriteBuffer: WGPUProcQueueWriteBuffer = null;
+    wgpuBufferMapAsync: WGPUProcBufferMapAsync = null;
+    wgpuBufferGetConstMappedRange: WGPUProcBufferGetConstMappedRange = null;
+    wgpuBufferUnmap: WGPUProcBufferUnmap = null;
+    wgpuBufferRelease: WGPUProcBufferRelease = null;
     wgpuRenderPipelineGetBindGroupLayout: WGPUProcRenderPipelineGetBindGroupLayout = null;
     wgpuSurfaceConfigure: WGPUProcSurfaceConfigure = null;
     wgpuSurfaceGetCurrentTexture: WGPUProcSurfaceGetCurrentTexture = null;
@@ -122,6 +134,8 @@ WebGPU_Api :: struct {
 Platform_System_Api :: struct {
     log: #type (text: [] u8) = null;
     request_quit: #type () = null;
+    write_file: #type (path: [] u8, data: [] u8) -> bool = null;
+    capture_rgba: #type (width: u32, height: u32, rgba: [] u8) -> bool = null;
     try_get_asset_blob: #type () -> [] u8 = null;
     asset_request_async: #type (path: [] u8) -> Asset_Request_Handle = null;
     asset_get_status: #type (handle: Asset_Request_Handle) -> Asset_Request_Status = null;

@@ -25,6 +25,12 @@ game_init :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, he
 // All external facts are supplied by Frame_Input, so recording those inputs is enough to replay.
 game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
     state.tick_count += 1;
+    if input.capture_request == .START {
+        renderer_capture_start(*state.renderer);
+    }
+    if input.capture_request == .STOP {
+        renderer_capture_stop(*state.renderer);
+    }
     if input.wants_quit {
         state.quit_requested = true;
         if platform.system.request_quit platform.system.request_quit();

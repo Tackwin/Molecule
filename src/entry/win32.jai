@@ -5,10 +5,14 @@
 #import "platform";
 #import "game";
 #import "renderer";
+#load "../Win32_Control.jai";
 #load "webgpu_win32.jai";
 
 platform_quit_requested := false;
 win32_asset_blob: [] u8;
+win32_sdl_movement_down: [4] bool;
+
+CreateDirectoryA :: (path: *u8, security_attributes: *void) -> BOOL #foreign kernel32;
 
 win32_try_get_asset_blob :: () -> [] u8 {
     return win32_asset_blob;
@@ -96,6 +100,67 @@ win32_map_asset_blob :: () -> Win32_Asset_Blob, bool {
 
 win32_request_quit :: () { platform_quit_requested = true; }
 
+win32_write_file :: (path: [] u8, data: [] u8) -> bool {
+    CreateDirectoryA("captures".data, null);
+    path_string: string = .{ data = path.data, count = path.count };
+    output, opened := file_open(path_string, for_writing = true, keep_existing_content = false);
+    if !opened {
+        return false;
+    }
+    defer file_close(*output);
+    return file_write(*output, data.data, data.count);
+}
+
+win32_capture_rgba :: (width: u32, height: u32, rgba: [] u8) -> bool {
+    if rgba.count != xx (cast(u64) width * height * 4) {
+        return false;
+    }
+    info: SDL_SysWMinfo = .{};
+    SDL_VERSION(*info.version);
+    if !SDL_GetWindowWMInfo(win32_webgpu_window, *info) {
+        return false;
+    }
+    hwnd := xx info.info.win.window;
+    source_dc := GetDC(hwnd);
+    if !source_dc {
+        return false;
+    }
+    defer ReleaseDC(hwnd, source_dc);
+    memory_dc := CreateCompatibleDC(source_dc);
+    if !memory_dc {
+        return false;
+    }
+    defer DeleteDC(memory_dc);
+    bitmap := CreateCompatibleBitmap(source_dc, cast(s32) width, cast(s32) height);
+    if !bitmap {
+        return false;
+    }
+    defer DeleteObject(xx bitmap);
+    previous_bitmap := SelectObject(memory_dc, xx bitmap);
+    defer SelectObject(memory_dc, previous_bitmap);
+    if !BitBlt(memory_dc, 0, 0, cast(s32) width, cast(s32) height, source_dc, 0, 0, .SRCCOPY) {
+        return false;
+    }
+    bitmap_info: BITMAPINFO = .{};
+    bitmap_info.bmiHeader.biSize = size_of(BITMAPINFOHEADER);
+    bitmap_info.bmiHeader.biWidth = cast(s32) width;
+    bitmap_info.bmiHeader.biHeight = -cast(s32) height;
+    bitmap_info.bmiHeader.biPlanes = 1;
+    bitmap_info.bmiHeader.biBitCount = 32;
+    bitmap_info.bmiHeader.biCompression = BI_RGB;
+    if GetDIBits(memory_dc, bitmap, 0, height, rgba.data, *bitmap_info, DIB_RGB_COLORS) != cast(s32) height {
+        return false;
+    }
+    for 0..width * height - 1 {
+        byte_index := it * 4;
+        blue := rgba[byte_index + 0];
+        rgba[byte_index + 0] = rgba[byte_index + 2];
+        rgba[byte_index + 2] = blue;
+        rgba[byte_index + 3] = 255;
+    }
+    return true;
+}
+
 win32_set_movement_key :: (input: *Frame_Input, key: SDL_Keycode, is_down: bool, is_pressed: bool, is_released: bool) {
     index: s32 = -1;
     if key == SDLK_z || key == SDLK_UP {
@@ -113,6 +178,7 @@ win32_set_movement_key :: (input: *Frame_Input, key: SDL_Keycode, is_down: bool,
     if index < 0 {
         return;
     }
+    win32_sdl_movement_down[index] = is_down;
     input.keyboard.down[index] = is_down;
     input.keyboard.pressed[index] = is_pressed;
     input.keyboard.released[index] = is_released;
@@ -121,6 +187,8 @@ win32_set_movement_key :: (input: *Frame_Input, key: SDL_Keycode, is_down: bool,
 make_win32_platform :: () -> Platform {
     platform: Platform;
     platform.system.request_quit = win32_request_quit;
+    platform.system.write_file = win32_write_file;
+    platform.system.capture_rgba = win32_capture_rgba;
     platform.system.try_get_asset_blob = win32_try_get_asset_blob;
     platform.system.asset_request_async = win32_asset_request_async;
     platform.system.asset_get_status = win32_asset_get_status;
@@ -134,11 +202,15 @@ poll_win32_input :: (window: *SDL_Window, input: *Frame_Input) {
         input.keyboard.pressed[it] = false;
         input.keyboard.released[it] = false;
     }
+    for 0..3 {
+        input.keyboard.down[it] = win32_sdl_movement_down[it];
+    }
     input.mouse.delta_pixels = .{};
     input.mouse.wheel_steps = 0;
     input.mouse.buttons_pressed = 0;
     input.mouse.buttons_released = 0;
     input.wants_quit = false;
+    input.capture_request = .NONE;
     input.simulation_delta_seconds = 1.0 / 60.0;
 
     event: SDL_Event;
@@ -196,9 +268,18 @@ main :: () {
     game_init(*game, *platform, 0x4d6f6c6563756c65, 1280, 720);
 
     input: Frame_Input;
+    control: Win32_Control;
+    if !win32_control_open(*control) {
+        return;
+    }
+    defer win32_control_shutdown(*control);
     while !platform_quit_requested {
         poll_win32_input(window, *input);
-        game_tick(*game, *input, *platform);
+        win32_control_poll(*control);
+        win32_control_merge_input(*control, *input);
+        if !control.paused {
+            game_tick(*game, *input, *platform);
+        }
         if input.wants_quit platform_quit_requested = true;
         SDL_Delay(1);
     }

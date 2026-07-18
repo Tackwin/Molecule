@@ -122,18 +122,31 @@ build_wasm :: () {
     compile_workspace(workspace, "src/entry/wasm.jai");
 }
 
+build_qoi_test :: () {
+    workspace := compiler_create_workspace("Molecule QOI Test");
+    configure_common(workspace);
+    options := get_build_options(workspace);
+    options.output_type = .EXECUTABLE;
+    options.output_executable_name = "qoi_test";
+    set_build_options(options, workspace);
+    compile_workspace(workspace, "src/entry/qoi_test.jai");
+}
+
 build :: () {
     set_build_options_dc(.{ do_output = false });
     args := get_build_options().compile_time_command_line;
     wants_win32 := false;
     wants_wasm := false;
+    wants_qoi_test := false;
     for args {
         wants_win32 |= compare(it, "win32") == 0;
         wants_wasm |= compare(it, "wasm") == 0;
+        wants_qoi_test |= compare(it, "qoi-test") == 0;
     }
-    if !wants_win32 && !wants_wasm wants_win32 = true;
+    if !wants_win32 && !wants_wasm && !wants_qoi_test wants_win32 = true;
     if wants_win32 build_win32();
     if wants_wasm build_wasm();
+    if wants_qoi_test build_qoi_test();
 }
 
 #run build();
