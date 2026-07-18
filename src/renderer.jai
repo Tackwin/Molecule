@@ -39,6 +39,8 @@ Renderer :: struct {
     instance_buffer: WGPUBuffer;
     depth_texture: WGPUTexture;
     depth_view: WGPUTextureView;
+    depth_width: u32;
+    depth_height: u32;
     bind_group: WGPUBindGroup;
     geometry_vertex_count: u32;
     instances: [..] Render_Instance;
@@ -78,6 +80,30 @@ renderer_copy_rgba :: (renderer: *Renderer, platform: *Platform, rgba: [] u8) ->
         return false;
     }
     return platform.system.capture_rgba(renderer.capture_width, renderer.capture_height, rgba);
+}
+
+renderer_resize_depth_attachment :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    gpu := *platform.gpu;
+    if renderer.depth_view && gpu.wgpuTextureViewRelease {
+        gpu.wgpuTextureViewRelease(renderer.depth_view);
+    }
+    if renderer.depth_texture && gpu.wgpuTextureRelease {
+        gpu.wgpuTextureRelease(renderer.depth_texture);
+    }
+    depth_descriptor: WGPUTextureDescriptor = .{};
+    depth_descriptor.usage = WGPUTextureUsage_RenderAttachment;
+    depth_descriptor.dimension = ._2D;
+    depth_descriptor.size = .{ width, height, 1 };
+    depth_descriptor.format = .Depth24Plus;
+    depth_descriptor.mipLevelCount = 1;
+    depth_descriptor.sampleCount = 1;
+    renderer.depth_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *depth_descriptor);
+    renderer.depth_view = gpu.wgpuTextureCreateView(renderer.depth_texture, null);
+    renderer.depth_width = width;
+    renderer.depth_height = height;
 }
 
 renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, shader: *Shader_Asset) {
@@ -165,15 +191,7 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     instance_descriptor.size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
     instance_descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     renderer.instance_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *instance_descriptor);
-    depth_descriptor: WGPUTextureDescriptor = .{};
-    depth_descriptor.usage = WGPUTextureUsage_RenderAttachment;
-    depth_descriptor.dimension = ._2D;
-    depth_descriptor.size = .{ width, height, 1 };
-    depth_descriptor.format = .Depth24Plus;
-    depth_descriptor.mipLevelCount = 1;
-    depth_descriptor.sampleCount = 1;
-    renderer.depth_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *depth_descriptor);
-    renderer.depth_view = gpu.wgpuTextureCreateView(renderer.depth_texture, null);
+    renderer_resize_depth_attachment(renderer, platform, width, height);
 
     layout := gpu.wgpuRenderPipelineGetBindGroupLayout(renderer.pipeline, 0);
     entries: [3] WGPUBindGroupEntry;
@@ -245,8 +263,11 @@ renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color:
     renderer.draw_batches[renderer.draw_batches.count - 1].instance_count += 1;
 }
 
-renderer_draw :: (renderer: *Renderer, platform: *Platform, camera: Render_Camera) {
+renderer_draw :: (renderer: *Renderer, platform: *Platform, camera: Render_Camera, width: u32, height: u32) {
     if !renderer.ready || renderer.instances.count == 0 return;
+    if renderer.depth_width != width || renderer.depth_height != height {
+        renderer_resize_depth_attachment(renderer, platform, width, height);
+    }
     gpu := *platform.gpu;
     gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.camera_buffer, 0, *camera, size_of(Render_Camera));
     gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.instance_buffer, 0, renderer.instances.data, cast(u64) renderer.instances.count * size_of(Render_Instance));

@@ -120,6 +120,7 @@ WebGPU_Api :: struct {
     wgpuSurfaceGetCurrentTexture: WGPUProcSurfaceGetCurrentTexture = null;
     wgpuSurfacePresent: WGPUProcSurfacePresent = null;
     wgpuTextureCreateView: WGPUProcTextureCreateView = null;
+    wgpuTextureRelease: WGPUProcTextureRelease = null;
     wgpuTextureViewRelease: WGPUProcTextureViewRelease = null;
     wgpuRenderPassEncoderRelease: WGPUProcRenderPassEncoderRelease = null;
     wgpuCommandEncoderRelease: WGPUProcCommandEncoderRelease = null;

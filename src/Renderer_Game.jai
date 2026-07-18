@@ -42,7 +42,7 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
     aspect_ratio := cast(float32) input.framebuffer_size_pixels.x / cast(float32) input.framebuffer_size_pixels.y;
     camera: Render_Camera = .{};
     camera.view_projection = camera_view_projection(state.camera, aspect_ratio);
-    renderer_draw(renderer, platform, camera);
+    renderer_draw(renderer, platform, camera, xx input.framebuffer_size_pixels.x, xx input.framebuffer_size_pixels.y);
 }
 
 game_capture_frame :: (state: *Game_State, platform: *Platform) {

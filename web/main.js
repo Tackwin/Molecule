@@ -72,6 +72,7 @@ async function boot() {
   const { instance } = await WebAssembly.instantiateStreaming(response, imports);
   wasm = instance.exports;
   jai_exports = wasm;
+  jai_context = wasm.__jai_runtime_init(0, 0n);
   jai_imports.js_memory_grew();
   await WebAssembly.promising(wasm.wasm_init)();
   wasm_frame = WebAssembly.promising(wasm.wasm_frame);

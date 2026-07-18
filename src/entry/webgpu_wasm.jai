@@ -178,6 +178,16 @@ wasm_wgpuTextureCreateView :: (
     return result;
 }
 
+wasm_wgpuTextureRelease :: (texture: WGPUTexture) #c_call {
+    jsTextureRelease :: (params: *void, returns: *void) #foreign;
+    jsTextureRelease(*texture, null);
+}
+
+wasm_wgpuTextureViewRelease :: (view: WGPUTextureView) #c_call {
+    jsTextureViewRelease :: (params: *void, returns: *void) #foreign;
+    jsTextureViewRelease(*view, null);
+}
+
 wasm_wgpuDeviceCreateCommandEncoder :: (
     device: WGPUDevice, descriptor: *WGPUCommandEncoderDescriptor
 ) -> WGPUCommandEncoder #c_call {
@@ -362,6 +372,8 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuSurfaceConfigure = wasm_wgpuSurfaceConfigure;
     gpu.wgpuSurfaceGetCurrentTexture = wasm_wgpuSurfaceGetCurrentTexture;
     gpu.wgpuTextureCreateView = wasm_wgpuTextureCreateView;
+    gpu.wgpuTextureRelease = wasm_wgpuTextureRelease;
+    gpu.wgpuTextureViewRelease = wasm_wgpuTextureViewRelease;
     gpu.wgpuDeviceCreateCommandEncoder = wasm_wgpuDeviceCreateCommandEncoder;
     gpu.wgpuCommandEncoderBeginRenderPass = wasm_wgpuCommandEncoderBeginRenderPass;
     gpu.wgpuRenderPassEncoderSetPipeline = wasm_wgpuRenderPassEncoderSetPipeline;

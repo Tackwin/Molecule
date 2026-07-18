@@ -81,6 +81,16 @@ wasm_try_get_asset_blob :: () -> [] u8 {
     return blob;
 }
 
+#program_export context_alloc :: (ctx: *#Context, size: s64) -> *void #c_call {
+    push_context, defer_pop ctx.*;
+    return alloc(size);
+}
+
+#program_export context_free :: (ctx: *#Context, memory: *void) #c_call {
+    push_context, defer_pop ctx.*;
+    free(memory);
+}
+
 #program_export "wasm_init" wasm_init :: () #c_call {
     push_context, defer_pop;
     install_wasm_webgpu(*wasm_platform.gpu);

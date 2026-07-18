@@ -2,6 +2,8 @@ const { chromium } = require("playwright");
 const path = require("path");
 
 const page_url = process.argv[2] ?? "http://localhost:8000/";
+const viewport_width = Number(process.env.WEB_RUNTIME_WIDTH ?? 1280);
+const viewport_height = Number(process.env.WEB_RUNTIME_HEIGHT ?? 720);
 
 (async () => {
   const browser = await chromium.launch({
@@ -26,7 +28,9 @@ const page_url = process.argv[2] ?? "http://localhost:8000/";
       "--disable-gpu-sandbox",
     ],
   });
-  const page = await browser.newPage();
+  const page = await browser.newPage({
+    viewport: { width: viewport_width, height: viewport_height },
+  });
   let failed = false;
 
   page.on("console", message => {

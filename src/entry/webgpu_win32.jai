@@ -21,6 +21,8 @@ wgpuDeviceCreateRenderPipeline :: (d: WGPUDevice, x: *WGPURenderPipelineDescript
 wgpuSurfaceConfigure :: (s: WGPUSurface, c: *WGPUSurfaceConfiguration) #foreign wgpu_native;
 wgpuSurfaceGetCurrentTexture :: (s: WGPUSurface, o: *WGPUSurfaceTexture) #foreign wgpu_native;
 wgpuTextureCreateView :: (t: WGPUTexture, d: *WGPUTextureViewDescriptor) -> WGPUTextureView #foreign wgpu_native;
+wgpuTextureRelease :: (t: WGPUTexture) #foreign wgpu_native;
+wgpuTextureViewRelease :: (v: WGPUTextureView) #foreign wgpu_native;
 wgpuDeviceCreateCommandEncoder :: (d: WGPUDevice, x: *WGPUCommandEncoderDescriptor) -> WGPUCommandEncoder #foreign wgpu_native;
 wgpuCommandEncoderBeginRenderPass :: (e: WGPUCommandEncoder, d: *WGPURenderPassDescriptor) -> WGPURenderPassEncoder #foreign wgpu_native;
 wgpuCommandEncoderCopyTextureToBuffer :: (encoder: WGPUCommandEncoder, source: *WGPUTexelCopyTextureInfo, destination: *WGPUTexelCopyBufferInfo, copy_size: *WGPUExtent3D) #foreign wgpu_native;
@@ -75,6 +77,8 @@ install_win32_webgpu :: (gpu: *WebGPU_Api, window: *SDL_Window) {
     gpu.wgpuSurfaceConfigure = wgpuSurfaceConfigure;
     gpu.wgpuSurfaceGetCurrentTexture = wgpuSurfaceGetCurrentTexture;
     gpu.wgpuTextureCreateView = wgpuTextureCreateView;
+    gpu.wgpuTextureRelease = wgpuTextureRelease;
+    gpu.wgpuTextureViewRelease = wgpuTextureViewRelease;
     gpu.wgpuDeviceCreateCommandEncoder = wgpuDeviceCreateCommandEncoder;
     gpu.wgpuCommandEncoderBeginRenderPass = wgpuCommandEncoderBeginRenderPass;
     gpu.wgpuCommandEncoderCopyTextureToBuffer = wgpuCommandEncoderCopyTextureToBuffer;
