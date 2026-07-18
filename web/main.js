@@ -1,6 +1,19 @@
 const canvas = document.querySelector("#game");
 let wasm;
 let wasm_frame;
+const movementKeyIndex = new Map([
+  ["z", 0],
+  ["ArrowUp", 0],
+  ["q", 1],
+  ["ArrowLeft", 1],
+  ["s", 2],
+  ["ArrowDown", 2],
+  ["d", 3],
+  ["ArrowRight", 3],
+]);
+const movementDown = new Uint8Array(4);
+const movementPressed = new Uint8Array(4);
+const movementReleased = new Uint8Array(4);
 
 function resizeCanvas() {
   const ratio = devicePixelRatio || 1;
@@ -8,10 +21,47 @@ function resizeCanvas() {
   canvas.height = Math.floor(innerHeight * ratio);
 }
 
+function movementKeyForEvent(event) {
+  if (event.key.startsWith("Arrow")) {
+    return event.key;
+  }
+  return event.key.toLowerCase();
+}
+
 async function boot() {
   if (!navigator.gpu) throw new Error("This browser does not expose WebGPU.");
   resizeCanvas();
   addEventListener("resize", resizeCanvas);
+  addEventListener("keydown", event => {
+    const keyIndex = movementKeyIndex.get(movementKeyForEvent(event));
+    if (keyIndex === undefined) {
+      return;
+    }
+    event.preventDefault();
+    if (!movementDown[keyIndex]) {
+      movementPressed[keyIndex] = 1;
+    }
+    movementDown[keyIndex] = 1;
+  });
+  addEventListener("keyup", event => {
+    const keyIndex = movementKeyIndex.get(movementKeyForEvent(event));
+    if (keyIndex === undefined) {
+      return;
+    }
+    event.preventDefault();
+    if (movementDown[keyIndex]) {
+      movementReleased[keyIndex] = 1;
+    }
+    movementDown[keyIndex] = 0;
+  });
+  addEventListener("blur", () => {
+    for (let keyIndex = 0; keyIndex < movementDown.length; keyIndex += 1) {
+      if (movementDown[keyIndex]) {
+        movementReleased[keyIndex] = 1;
+      }
+      movementDown[keyIndex] = 0;
+    }
+  });
 
   // Jai currently emits wasm64; its imported memory therefore uses 64-bit addresses.
   // Keep these limits in sync with the current linker output (18 64 KiB pages).
@@ -30,6 +80,16 @@ async function boot() {
 
 async function frame() {
   wasm.wasm_set_frame_basics(1 / 60, innerWidth, innerHeight, canvas.width, canvas.height);
+  for (let keyIndex = 0; keyIndex < movementDown.length; keyIndex += 1) {
+    wasm.wasm_set_move_key(
+      keyIndex,
+      movementDown[keyIndex],
+      movementPressed[keyIndex],
+      movementReleased[keyIndex],
+    );
+  }
+  movementPressed.fill(0);
+  movementReleased.fill(0);
   await wasm_frame();
   requestAnimationFrame(frame);
 }

@@ -96,6 +96,7 @@ build_win32 :: () {
 }
 
 build_wasm :: () {
+    build_assets_blob();
     workspace := compiler_create_workspace("Molecule WASM");
     configure_common(workspace);
     options := get_build_options(workspace);

@@ -34,6 +34,12 @@ device_ready :: (
 }
 
 renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, shader_bytes: [] u8) {
+    // A browser starts without the optional packed asset blob.  Its Store
+    // promotes the shader after the asynchronous platform request completes.
+    // Until then there is no valid pipeline to create.
+    if shader_bytes.count == 0 {
+        return;
+    }
     gpu := *platform.gpu;
     renderer.instance = gpu.wgpuCreateInstance(null);
     renderer.surface = gpu.wgpuInstanceCreateSurface(renderer.instance, null);

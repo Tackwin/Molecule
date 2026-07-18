@@ -65,6 +65,38 @@ wasm_wgpuDeviceGetQueue :: (device: WGPUDevice) -> WGPUQueue #c_call {
     return result;
 }
 
+wasm_wgpuDeviceCreateBuffer :: (
+    device: WGPUDevice, descriptor: *WGPUBufferDescriptor
+) -> WGPUBuffer #c_call {
+    jsDeviceCreateBuffer :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        device: WGPUDevice;
+        descriptor: *WGPUBufferDescriptor;
+    }
+    params: Params;
+    params.device = device;
+    params.descriptor = descriptor;
+    result: WGPUBuffer;
+    jsDeviceCreateBuffer(*params, *result);
+    return result;
+}
+
+wasm_wgpuDeviceCreateBindGroup :: (
+    device: WGPUDevice, descriptor: *WGPUBindGroupDescriptor
+) -> WGPUBindGroup #c_call {
+    jsDeviceCreateBindGroup :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        device: WGPUDevice;
+        descriptor: *WGPUBindGroupDescriptor;
+    }
+    params: Params;
+    params.device = device;
+    params.descriptor = descriptor;
+    result: WGPUBindGroup;
+    jsDeviceCreateBindGroup(*params, *result);
+    return result;
+}
+
 wasm_wgpuDeviceCreateShaderModule :: (
     device: WGPUDevice, descriptor: *WGPUShaderModuleDescriptor
 ) -> WGPUShaderModule #c_call {
@@ -174,6 +206,30 @@ wasm_wgpuRenderPassEncoderSetPipeline :: (pass: WGPURenderPassEncoder, pipeline:
     jsRenderPassEncoderSetPipeline(*params, null);
 }
 
+wasm_wgpuRenderPassEncoderSetBindGroup :: (
+    pass: WGPURenderPassEncoder,
+    group_index: u32,
+    group: WGPUBindGroup,
+    dynamic_offset_count: u64,
+    dynamic_offsets: *u32
+) #c_call {
+    jsRenderPassEncoderSetBindGroup :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        pass: WGPURenderPassEncoder;
+        group_index: u64;
+        group: WGPUBindGroup;
+        dynamic_offset_count: u64;
+        dynamic_offsets: *u32;
+    }
+    params: Params;
+    params.pass = pass;
+    params.group_index = group_index;
+    params.group = group;
+    params.dynamic_offset_count = dynamic_offset_count;
+    params.dynamic_offsets = dynamic_offsets;
+    jsRenderPassEncoderSetBindGroup(*params, null);
+}
+
 wasm_wgpuRenderPassEncoderDraw :: (
     pass: WGPURenderPassEncoder, vertices: u32, instances: u32, first_vertex: u32, first_instance: u32
 ) #c_call {
@@ -229,6 +285,46 @@ wasm_wgpuQueueSubmit :: (queue: WGPUQueue, count: u64, commands: *WGPUCommandBuf
     jsQueueSubmit(*params, null);
 }
 
+wasm_wgpuQueueWriteBuffer :: (
+    queue: WGPUQueue,
+    buffer: WGPUBuffer,
+    offset: u64,
+    data: *void,
+    size: u64
+) #c_call {
+    jsQueueWriteBuffer :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        queue: WGPUQueue;
+        buffer: WGPUBuffer;
+        offset: u64;
+        data: *void;
+        size: u64;
+    }
+    params: Params;
+    params.queue = queue;
+    params.buffer = buffer;
+    params.offset = offset;
+    params.data = data;
+    params.size = size;
+    jsQueueWriteBuffer(*params, null);
+}
+
+wasm_wgpuRenderPipelineGetBindGroupLayout :: (
+    pipeline: WGPURenderPipeline, group_index: u32
+) -> WGPUBindGroupLayout #c_call {
+    jsRenderPipelineGetBindGroupLayout :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        pipeline: WGPURenderPipeline;
+        group_index: u32;
+    }
+    params: Params;
+    params.pipeline = pipeline;
+    params.group_index = group_index;
+    result: WGPUBindGroupLayout;
+    jsRenderPipelineGetBindGroupLayout(*params, *result);
+    return result;
+}
+
 wasm_wgpuSurfacePresent :: (surface: WGPUSurface) -> WGPUStatus #c_call {
     jsSurfacePresent :: (params: *void, returns: *void) #foreign;
     jsSurfacePresent(*surface, null);
@@ -242,6 +338,8 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuInstanceRequestAdapter = wasm_wgpuInstanceRequestAdapter;
     gpu.wgpuAdapterRequestDevice = wasm_wgpuAdapterRequestDevice;
     gpu.wgpuDeviceGetQueue = wasm_wgpuDeviceGetQueue;
+    gpu.wgpuDeviceCreateBuffer = wasm_wgpuDeviceCreateBuffer;
+    gpu.wgpuDeviceCreateBindGroup = wasm_wgpuDeviceCreateBindGroup;
     gpu.wgpuDeviceCreateShaderModule = wasm_wgpuDeviceCreateShaderModule;
     gpu.wgpuDeviceCreateRenderPipeline = wasm_wgpuDeviceCreateRenderPipeline;
     gpu.wgpuSurfaceConfigure = wasm_wgpuSurfaceConfigure;
@@ -250,9 +348,12 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuDeviceCreateCommandEncoder = wasm_wgpuDeviceCreateCommandEncoder;
     gpu.wgpuCommandEncoderBeginRenderPass = wasm_wgpuCommandEncoderBeginRenderPass;
     gpu.wgpuRenderPassEncoderSetPipeline = wasm_wgpuRenderPassEncoderSetPipeline;
+    gpu.wgpuRenderPassEncoderSetBindGroup = wasm_wgpuRenderPassEncoderSetBindGroup;
     gpu.wgpuRenderPassEncoderDraw = wasm_wgpuRenderPassEncoderDraw;
     gpu.wgpuRenderPassEncoderEnd = wasm_wgpuRenderPassEncoderEnd;
     gpu.wgpuCommandEncoderFinish = wasm_wgpuCommandEncoderFinish;
     gpu.wgpuQueueSubmit = wasm_wgpuQueueSubmit;
+    gpu.wgpuQueueWriteBuffer = wasm_wgpuQueueWriteBuffer;
+    gpu.wgpuRenderPipelineGetBindGroupLayout = wasm_wgpuRenderPipelineGetBindGroupLayout;
     gpu.wgpuSurfacePresent = wasm_wgpuSurfacePresent;
 }
