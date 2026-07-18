@@ -1,7 +1,31 @@
 #import "Basic";
 #import "platform";
 #import "Algebra";
-#import "Qoi";
+#import "Store";
+
+MAX_RENDER_INSTANCES :: 1024;
+MAX_RENDER_GEOMETRY_VERTICES :: 4096;
+MAX_RENDER_DRAW_BATCHES :: 16;
+
+Render_Instance :: struct {
+    model: M4f;
+    color: V4f;
+    vertex_offset: u32;
+    padding0: u32;
+    padding1: u32;
+    padding2: u32;
+}
+
+Render_Camera :: struct {
+    view_projection: M4f;
+}
+
+Render_Draw_Batch :: struct {
+    vertex_offset: u32;
+    vertex_count: u32;
+    first_instance: u32;
+    instance_count: u32;
+}
 
 Renderer :: struct {
     instance: WGPUInstance;
@@ -10,16 +34,18 @@ Renderer :: struct {
     queue: WGPUQueue;
     surface: WGPUSurface;
     pipeline: WGPURenderPipeline;
-    offset_buffer: WGPUBuffer;
-    offset_bind_group: WGPUBindGroup;
+    camera_buffer: WGPUBuffer;
+    geometry_buffer: WGPUBuffer;
+    instance_buffer: WGPUBuffer;
+    depth_texture: WGPUTexture;
+    depth_view: WGPUTextureView;
+    bind_group: WGPUBindGroup;
+    geometry_vertex_count: u32;
+    instances: [..] Render_Instance;
+    draw_batches: [..] Render_Draw_Batch;
     capture_width: u32;
     capture_height: u32;
-    capture_enabled: bool;
     capture_supported: bool;
-    capture_frame_index: u64;
-    capture_rgba: [..] u8;
-    capture_pixels: [..] Qoi_Pixel;
-    capture_qoi: [..] u8;
     ready: bool;
 }
 
@@ -43,63 +69,19 @@ device_ready :: (
     renderer.device = device;
 }
 
-renderer_capture_start :: (renderer: *Renderer) {
-    if renderer.capture_supported {
-        renderer.capture_enabled = true;
+renderer_copy_rgba :: (renderer: *Renderer, platform: *Platform, rgba: [] u8) -> bool {
+    if !renderer.capture_supported || !platform.system.capture_rgba {
+        return false;
     }
+    expected_byte_count := cast(int) renderer.capture_width * renderer.capture_height * 4;
+    if rgba.count != expected_byte_count {
+        return false;
+    }
+    return platform.system.capture_rgba(renderer.capture_width, renderer.capture_height, rgba);
 }
 
-renderer_capture_stop :: (renderer: *Renderer) {
-    renderer.capture_enabled = false;
-}
-
-renderer_capture_frame :: (renderer: *Renderer, platform: *Platform) {
-    if !platform.system.write_file || !platform.system.capture_rgba {
-        return;
-    }
-    pixel_count := cast(u64) renderer.capture_width * renderer.capture_height;
-    array_resize(*renderer.capture_rgba, xx (pixel_count * 4));
-    if !platform.system.capture_rgba(renderer.capture_width, renderer.capture_height, renderer.capture_rgba) {
-        return;
-    }
-    array_resize(*renderer.capture_pixels, xx pixel_count);
-    for y: 0..renderer.capture_height - 1 {
-        for x: 0..renderer.capture_width - 1 {
-            source_index := (y * renderer.capture_width + x) * 4;
-            destination_index := y * renderer.capture_width + x;
-            renderer.capture_pixels[destination_index] = .{
-                renderer.capture_rgba[source_index + 0],
-                renderer.capture_rgba[source_index + 1],
-                renderer.capture_rgba[source_index + 2],
-                renderer.capture_rgba[source_index + 3],
-            };
-        }
-    }
-
-    max_qoi_bytes := qoi_encoded_max_size(pixel_count);
-    array_resize(*renderer.capture_qoi, xx max_qoi_bytes);
-    info: Qoi_Image_Info = .{
-        width = renderer.capture_width,
-        height = renderer.capture_height,
-        channels = 4,
-        colorspace = 0,
-    };
-    qoi_bytes, encoded := qoi_encode(info, renderer.capture_pixels, renderer.capture_qoi);
-    if !encoded {
-        return;
-    }
-    renderer.capture_qoi.count = xx qoi_bytes;
-    path := tprint("captures/frame_%.qoi", renderer.capture_frame_index);
-    if platform.system.write_file(.{ data = path.data, count = path.count }, renderer.capture_qoi) {
-        renderer.capture_frame_index += 1;
-    }
-}
-
-renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, shader_bytes: [] u8) {
-    // A browser starts without the optional packed asset blob.  Its Store
-    // promotes the shader after the asynchronous platform request completes.
-    // Until then there is no valid pipeline to create.
-    if shader_bytes.count == 0 {
+renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, shader: *Shader_Asset) {
+    if shader.asset.bytes.count == 0 {
         return;
     }
     gpu := *platform.gpu;
@@ -142,41 +124,77 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
 
     source: WGPUShaderSourceWGSL = .{};
     source.chain.sType = .ShaderSourceWGSL;
-    source.code = .{ data = shader_bytes.data, length = xx shader_bytes.count };
+    source.code = .{ data = shader.asset.bytes.data, length = xx shader.asset.bytes.count };
     shader_descriptor: WGPUShaderModuleDescriptor = .{};
     shader_descriptor.nextInChain = *source.chain;
-    shader := gpu.wgpuDeviceCreateShaderModule(renderer.device, *shader_descriptor);
+    shader_module := gpu.wgpuDeviceCreateShaderModule(renderer.device, *shader_descriptor);
 
     target: WGPUColorTargetState = .{};
     target.format = .BGRA8Unorm;
     target.writeMask = WGPUColorWriteMask_All;
     fragment: WGPUFragmentState = .{};
-    fragment.module = shader;
+    fragment.module = shader_module;
     fragment.entryPoint = to_wgpu_string("fs");
     fragment.targetCount = 1;
     fragment.targets = *target;
     pipeline_descriptor: WGPURenderPipelineDescriptor = .{};
-    pipeline_descriptor.vertex.module = shader;
+    pipeline_descriptor.vertex.module = shader_module;
     pipeline_descriptor.vertex.entryPoint = to_wgpu_string("vs");
     pipeline_descriptor.primitive.topology = .TriangleList;
+    depth_stencil: WGPUDepthStencilState = .{};
+    depth_stencil.format = .Depth24Plus;
+    depth_stencil.depthWriteEnabled = .True;
+    depth_stencil.depthCompare = .Less;
+    pipeline_descriptor.depthStencil = *depth_stencil;
     pipeline_descriptor.multisample.count = 1;
     pipeline_descriptor.multisample.mask = 0xffffffff;
     pipeline_descriptor.fragment = *fragment;
     renderer.pipeline = gpu.wgpuDeviceCreateRenderPipeline(renderer.device, *pipeline_descriptor);
-    offset_buffer_descriptor: WGPUBufferDescriptor = .{};
-    offset_buffer_descriptor.size = size_of(V2f);
-    offset_buffer_descriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    renderer.offset_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *offset_buffer_descriptor);
-    offset_layout := gpu.wgpuRenderPipelineGetBindGroupLayout(renderer.pipeline, 0);
-    offset_entry: WGPUBindGroupEntry = .{};
-    offset_entry.binding = 0;
-    offset_entry.buffer = renderer.offset_buffer;
-    offset_entry.size = size_of(V2f);
-    offset_group_descriptor: WGPUBindGroupDescriptor = .{};
-    offset_group_descriptor.layout = offset_layout;
-    offset_group_descriptor.entryCount = 1;
-    offset_group_descriptor.entries = *offset_entry;
-    renderer.offset_bind_group = gpu.wgpuDeviceCreateBindGroup(renderer.device, *offset_group_descriptor);
+
+    geometry_bytes := cast(u64) MAX_RENDER_GEOMETRY_VERTICES * size_of(Mesh_Vertex);
+    geometry_descriptor: WGPUBufferDescriptor = .{};
+    geometry_descriptor.size = geometry_bytes;
+    geometry_descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    renderer.geometry_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *geometry_descriptor);
+
+    camera_descriptor: WGPUBufferDescriptor = .{};
+    camera_descriptor.size = size_of(Render_Camera);
+    camera_descriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    renderer.camera_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *camera_descriptor);
+    instance_descriptor: WGPUBufferDescriptor = .{};
+    instance_descriptor.size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
+    instance_descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    renderer.instance_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *instance_descriptor);
+    depth_descriptor: WGPUTextureDescriptor = .{};
+    depth_descriptor.usage = WGPUTextureUsage_RenderAttachment;
+    depth_descriptor.dimension = ._2D;
+    depth_descriptor.size = .{ width, height, 1 };
+    depth_descriptor.format = .Depth24Plus;
+    depth_descriptor.mipLevelCount = 1;
+    depth_descriptor.sampleCount = 1;
+    renderer.depth_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *depth_descriptor);
+    renderer.depth_view = gpu.wgpuTextureCreateView(renderer.depth_texture, null);
+
+    layout := gpu.wgpuRenderPipelineGetBindGroupLayout(renderer.pipeline, 0);
+    entries: [3] WGPUBindGroupEntry;
+    for 0..2 {
+        entries[it] = .{};
+    }
+    entries[0].binding = 0;
+    entries[0].buffer = renderer.camera_buffer;
+    entries[0].size = size_of(Render_Camera);
+    entries[1].binding = 1;
+    entries[1].buffer = renderer.geometry_buffer;
+    entries[1].size = geometry_bytes;
+    entries[2].binding = 2;
+    entries[2].buffer = renderer.instance_buffer;
+    entries[2].size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
+    bind_group_descriptor: WGPUBindGroupDescriptor = .{};
+    bind_group_descriptor.layout = layout;
+    bind_group_descriptor.entryCount = entries.count;
+    bind_group_descriptor.entries = *entries[0];
+    renderer.bind_group = gpu.wgpuDeviceCreateBindGroup(renderer.device, *bind_group_descriptor);
+
     if platform.system.capture_rgba {
         renderer.capture_width = width;
         renderer.capture_height = height;
@@ -185,9 +203,53 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     renderer.ready = true;
 }
 
-renderer_draw :: (renderer: *Renderer, platform: *Platform, offset: V2f) {
-    if !renderer.ready return;
+renderer_begin_instances :: (renderer: *Renderer) {
+    renderer.instances.count = 0;
+    renderer.draw_batches.count = 0;
+}
+
+renderer_upload_mesh_asset :: (renderer: *Renderer, platform: *Platform, mesh: *Mesh_Asset) -> bool {
+    if !renderer.ready || mesh.vertices.count == 0 {
+        return false;
+    }
+    if mesh.gpu_uploaded_asset_version == mesh.asset.version {
+        return true;
+    }
+    if renderer.geometry_vertex_count + mesh.vertices.count > MAX_RENDER_GEOMETRY_VERTICES {
+        return false;
+    }
+    mesh.gpu_vertex_offset = renderer.geometry_vertex_count;
+    mesh.gpu_vertex_count = xx mesh.vertices.count;
+    byte_offset := cast(u64) mesh.gpu_vertex_offset * size_of(Mesh_Vertex);
+    byte_count := cast(u64) mesh.vertices.count * size_of(Mesh_Vertex);
     gpu := *platform.gpu;
+    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.geometry_buffer, byte_offset, mesh.vertices.data, byte_count);
+    renderer.geometry_vertex_count += mesh.gpu_vertex_count;
+    mesh.gpu_uploaded_asset_version = mesh.asset.version;
+    return true;
+}
+
+renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color: V4f) {
+    if renderer.instances.count >= MAX_RENDER_INSTANCES return;
+    if mesh.gpu_vertex_count == 0 return;
+    if renderer.draw_batches.count == 0 ||
+        renderer.draw_batches[renderer.draw_batches.count - 1].vertex_offset != mesh.gpu_vertex_offset {
+        if renderer.draw_batches.count >= MAX_RENDER_DRAW_BATCHES return;
+        array_add(*renderer.draw_batches, .{
+            vertex_offset = mesh.gpu_vertex_offset,
+            vertex_count = mesh.gpu_vertex_count,
+            first_instance = xx renderer.instances.count,
+        });
+    }
+    array_add(*renderer.instances, .{ model = model, color = color, vertex_offset = mesh.gpu_vertex_offset });
+    renderer.draw_batches[renderer.draw_batches.count - 1].instance_count += 1;
+}
+
+renderer_draw :: (renderer: *Renderer, platform: *Platform, camera: Render_Camera) {
+    if !renderer.ready || renderer.instances.count == 0 return;
+    gpu := *platform.gpu;
+    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.camera_buffer, 0, *camera, size_of(Render_Camera));
+    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.instance_buffer, 0, renderer.instances.data, cast(u64) renderer.instances.count * size_of(Render_Instance));
     surface_texture: WGPUSurfaceTexture = .{};
     gpu.wgpuSurfaceGetCurrentTexture(renderer.surface, *surface_texture);
     if surface_texture.status != .SuccessOptimal && surface_texture.status != .SuccessSuboptimal return;
@@ -200,17 +262,21 @@ renderer_draw :: (renderer: *Renderer, platform: *Platform, offset: V2f) {
     pass_descriptor: WGPURenderPassDescriptor = .{};
     pass_descriptor.colorAttachmentCount = 1;
     pass_descriptor.colorAttachments = *attachment;
-    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.offset_buffer, 0, *offset, size_of(V2f));
+    depth_attachment: WGPURenderPassDepthStencilAttachment = .{};
+    depth_attachment.view = renderer.depth_view;
+    depth_attachment.depthLoadOp = .Clear;
+    depth_attachment.depthStoreOp = .Store;
+    depth_attachment.depthClearValue = 1.0;
+    pass_descriptor.depthStencilAttachment = *depth_attachment;
     encoder := gpu.wgpuDeviceCreateCommandEncoder(renderer.device, null);
     pass := gpu.wgpuCommandEncoderBeginRenderPass(encoder, *pass_descriptor);
     gpu.wgpuRenderPassEncoderSetPipeline(pass, renderer.pipeline);
-    gpu.wgpuRenderPassEncoderSetBindGroup(pass, 0, renderer.offset_bind_group, 0, null);
-    gpu.wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    gpu.wgpuRenderPassEncoderSetBindGroup(pass, 0, renderer.bind_group, 0, null);
+    for renderer.draw_batches {
+        gpu.wgpuRenderPassEncoderDraw(pass, it.vertex_count, it.instance_count, 0, it.first_instance);
+    }
     gpu.wgpuRenderPassEncoderEnd(pass);
     command := gpu.wgpuCommandEncoderFinish(encoder, null);
     gpu.wgpuQueueSubmit(renderer.queue, 1, *command);
     gpu.wgpuSurfacePresent(renderer.surface);
-    if renderer.capture_enabled {
-        renderer_capture_frame(renderer, platform);
-    }
 }

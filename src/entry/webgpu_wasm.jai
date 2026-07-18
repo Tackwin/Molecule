@@ -81,6 +81,22 @@ wasm_wgpuDeviceCreateBuffer :: (
     return result;
 }
 
+wasm_wgpuDeviceCreateTexture :: (
+    device: WGPUDevice, descriptor: *WGPUTextureDescriptor
+) -> WGPUTexture #c_call {
+    jsDeviceCreateTexture :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        device: WGPUDevice;
+        descriptor: *WGPUTextureDescriptor;
+    }
+    params: Params;
+    params.device = device;
+    params.descriptor = descriptor;
+    result: WGPUTexture;
+    jsDeviceCreateTexture(*params, *result);
+    return result;
+}
+
 wasm_wgpuDeviceCreateBindGroup :: (
     device: WGPUDevice, descriptor: *WGPUBindGroupDescriptor
 ) -> WGPUBindGroup #c_call {
@@ -339,6 +355,7 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuAdapterRequestDevice = wasm_wgpuAdapterRequestDevice;
     gpu.wgpuDeviceGetQueue = wasm_wgpuDeviceGetQueue;
     gpu.wgpuDeviceCreateBuffer = wasm_wgpuDeviceCreateBuffer;
+    gpu.wgpuDeviceCreateTexture = wasm_wgpuDeviceCreateTexture;
     gpu.wgpuDeviceCreateBindGroup = wasm_wgpuDeviceCreateBindGroup;
     gpu.wgpuDeviceCreateShaderModule = wasm_wgpuDeviceCreateShaderModule;
     gpu.wgpuDeviceCreateRenderPipeline = wasm_wgpuDeviceCreateRenderPipeline;

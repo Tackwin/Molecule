@@ -120,6 +120,7 @@ build_wasm :: () {
     set_build_options(options, workspace);
     remap_import(workspace, "*", "Default_Allocator", "Walloc");
     compile_workspace(workspace, "src/entry/wasm.jai");
+    copy_file("build/assets.blob", "web/assets.blob");
 }
 
 build_qoi_test :: () {

@@ -210,7 +210,7 @@ poll_win32_input :: (window: *SDL_Window, input: *Frame_Input) {
     input.mouse.buttons_pressed = 0;
     input.mouse.buttons_released = 0;
     input.wants_quit = false;
-    input.capture_request = .NONE;
+    input.capture_frame = false;
     input.simulation_delta_seconds = 1.0 / 60.0;
 
     event: SDL_Event;

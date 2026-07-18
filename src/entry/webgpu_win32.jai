@@ -10,6 +10,7 @@ wgpuInstanceRequestAdapter :: (i: WGPUInstance, o: *WGPURequestAdapterOptions, c
 wgpuAdapterRequestDevice :: (a: WGPUAdapter, d: *WGPUDeviceDescriptor, c: WGPURequestDeviceCallbackInfo) -> WGPUFuture #foreign wgpu_native;
 wgpuDeviceGetQueue :: (d: WGPUDevice) -> WGPUQueue #foreign wgpu_native;
 wgpuDeviceCreateBuffer :: (d: WGPUDevice, x: *WGPUBufferDescriptor) -> WGPUBuffer #foreign wgpu_native;
+wgpuDeviceCreateTexture :: (d: WGPUDevice, x: *WGPUTextureDescriptor) -> WGPUTexture #foreign wgpu_native;
 wgpuBufferMapAsync :: (buffer: WGPUBuffer, mode: WGPUMapMode, offset: u64, size: u64, callback: WGPUBufferMapCallbackInfo) -> WGPUFuture #foreign wgpu_native;
 wgpuBufferGetConstMappedRange :: (buffer: WGPUBuffer, offset: u64, size: u64) -> *void #foreign wgpu_native;
 wgpuBufferUnmap :: (buffer: WGPUBuffer) #foreign wgpu_native;
@@ -63,6 +64,7 @@ install_win32_webgpu :: (gpu: *WebGPU_Api, window: *SDL_Window) {
     gpu.wgpuAdapterRequestDevice = wgpuAdapterRequestDevice;
     gpu.wgpuDeviceGetQueue = wgpuDeviceGetQueue;
     gpu.wgpuDeviceCreateBuffer = wgpuDeviceCreateBuffer;
+    gpu.wgpuDeviceCreateTexture = wgpuDeviceCreateTexture;
     gpu.wgpuBufferMapAsync = wgpuBufferMapAsync;
     gpu.wgpuBufferGetConstMappedRange = wgpuBufferGetConstMappedRange;
     gpu.wgpuBufferUnmap = wgpuBufferUnmap;

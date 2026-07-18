@@ -17,7 +17,7 @@ Win32_Control :: struct {
     movement_down: [4] bool;
     movement_pressed: [4] bool;
     movement_released: [4] bool;
-    capture_request: Frame_Capture_Request;
+    capture_enabled: bool;
     has_mouse_position: bool;
     mouse_position: V2i;
     mouse_delta: V2i;
@@ -109,10 +109,10 @@ win32_control_apply_command :: (control: *Win32_Control, command: string) {
     if verb == "capture" {
         action := win32_control_next_token(*remaining);
         if action == "start" {
-            control.capture_request = .START;
+            control.capture_enabled = true;
         }
         if action == "stop" {
-            control.capture_request = .STOP;
+            control.capture_enabled = false;
         }
         return;
     }
@@ -209,8 +209,7 @@ win32_control_merge_input :: (control: *Win32_Control, input: *Frame_Input) {
     }
     input.mouse.delta_pixels += control.mouse_delta;
     control.mouse_delta = .{};
-    input.capture_request = control.capture_request;
-    control.capture_request = .NONE;
+    input.capture_frame = control.capture_enabled;
     input.wants_quit = input.wants_quit || control.quit_requested;
     control.quit_requested = false;
 }

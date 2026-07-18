@@ -489,8 +489,8 @@ const textureFormatConvert = (format) => {
 		case WGPUTextureFormat_RGBA32Sint: return "rgba32sint";
 		case WGPUTextureFormat_Stencil8: return "stencil8";
 		case WGPUTextureFormat_Depth16Unorm: return "depth16unorm";
-		case WGPUTextureFormat_Depth24Plus: return "";
-		case WGPUTextureFormat_Depth24PlusStencil8: return "";
+		case WGPUTextureFormat_Depth24Plus: return "depth24plus";
+		case WGPUTextureFormat_Depth24PlusStencil8: return "depth24plus-stencil8";
 		case WGPUTextureFormat_Depth32Float: return "depth32float";
 		case WGPUTextureFormat_Depth32FloatStencil8: return "depth32float-stencil8";
 		case WGPUTextureFormat_BC1RGBAUnorm: return "";

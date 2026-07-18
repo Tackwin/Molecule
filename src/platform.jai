@@ -77,12 +77,6 @@ Mouse_State :: struct {
     buttons_released: u8;
 }
 
-Frame_Capture_Request :: enum u8 {
-    NONE;
-    START;
-    STOP;
-}
-
 Frame_Input :: struct {
     simulation_delta_seconds: float32;
     window_size_pixels: V2i;
@@ -90,7 +84,7 @@ Frame_Input :: struct {
     keyboard: Keyboard_State;
     mouse: Mouse_State;
     wants_quit: bool;
-    capture_request: Frame_Capture_Request;
+    capture_frame: bool;
     async_events: [] Async_Event; // Allocated from the current frame arena.
 }
 
@@ -103,6 +97,7 @@ WebGPU_Api :: struct {
     wgpuAdapterRequestDevice: WGPUProcAdapterRequestDevice = null;
     wgpuDeviceGetQueue: WGPUProcDeviceGetQueue = null;
     wgpuDeviceCreateBuffer: WGPUProcDeviceCreateBuffer = null;
+    wgpuDeviceCreateTexture: WGPUProcDeviceCreateTexture = null;
     wgpuDeviceCreateBindGroup: WGPUProcDeviceCreateBindGroup = null;
     wgpuDeviceCreateShaderModule: WGPUProcDeviceCreateShaderModule = null;
     wgpuDeviceCreateRenderPipeline: WGPUProcDeviceCreateRenderPipeline = null;
