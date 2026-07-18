@@ -79,15 +79,16 @@ async function boot() {
 }
 
 async function frame() {
-  wasm.wasm_set_frame_basics(1 / 60, innerWidth, innerHeight, canvas.width, canvas.height);
-  for (let keyIndex = 0; keyIndex < movementDown.length; keyIndex += 1) {
-    wasm.wasm_set_move_key(
-      keyIndex,
-      movementDown[keyIndex],
-      movementPressed[keyIndex],
-      movementReleased[keyIndex],
-    );
-  }
+  writeWasmFrameInput({
+    deltaSeconds: 1 / 60,
+    windowWidth: innerWidth,
+    windowHeight: innerHeight,
+    framebufferWidth: canvas.width,
+    framebufferHeight: canvas.height,
+    movementDown,
+    movementPressed,
+    movementReleased,
+  });
   movementPressed.fill(0);
   movementReleased.fill(0);
   await wasm_frame();
