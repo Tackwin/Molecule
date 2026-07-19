@@ -4,6 +4,7 @@ const path = require("path");
 const page_url = process.argv[2] ?? "http://localhost:8000/";
 const viewport_width = Number(process.env.WEB_RUNTIME_WIDTH ?? 1280);
 const viewport_height = Number(process.env.WEB_RUNTIME_HEIGHT ?? 720);
+const hold_ms = Number(process.env.WEB_RUNTIME_HOLD_MS ?? 0);
 
 (async () => {
   const browser = await chromium.launch({
@@ -42,9 +43,30 @@ const viewport_height = Number(process.env.WEB_RUNTIME_HEIGHT ?? 720);
     failed = true;
   });
 
-  await page.goto(page_url, { waitUntil: "networkidle" });
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: "web/runtime-check.png" });
+  await page.goto(page_url, { waitUntil: "load" });
+  try {
+    await page.waitForFunction(
+      () => globalThis.moleculeRuntime?.initialized && globalThis.moleculeRuntime.frameCount >= 2,
+      null,
+      { timeout: 15000 },
+    );
+  } catch (error) {
+    console.log(`runtime-timeout:${JSON.stringify(await page.evaluate(() => globalThis.moleculeRuntime))}`);
+    throw error;
+  }
+  console.log(`runtime:${JSON.stringify(await page.evaluate(() => ({
+    initialized: globalThis.moleculeRuntime.initialized,
+    frameCount: globalThis.moleculeRuntime.frameCount,
+    canvasWidth: document.querySelector("#game").width,
+    canvasHeight: document.querySelector("#game").height,
+    error: document.body.dataset.error ?? "",
+  })))}`);
+  if (hold_ms > 0) {
+    await page.waitForTimeout(hold_ms);
+  }
+  await page.evaluate(() => { globalThis.moleculeRuntime.paused = true; });
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: "web/runtime-check.png", timeout: 120000 });
   await browser.close();
   process.exitCode = failed ? 1 : 0;
 })();

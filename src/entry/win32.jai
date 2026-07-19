@@ -120,7 +120,8 @@ win32_watch_file_changes :: (directory: [] u8) -> File_Watch_Handle {
             return 0;
         }
         directory_string: string = .{ data = directory.data, count = directory.count };
-        if !add_directories(*slot.watcher, directory_string) {
+        asset_directory := tprint("../Assets/%", directory_string);
+        if !add_directories(*slot.watcher, asset_directory) {
             deinit(slot.watcher);
             slot.* = .{};
             return 0;
@@ -328,12 +329,18 @@ poll_win32_input :: (window: *SDL_Window, input: *Frame_Input) {
                 if event.button.button == SDL_BUTTON_LEFT {
                     input.mouse.buttons_down |= 1;
                     input.mouse.buttons_pressed |= 1;
+                } else if event.button.button == SDL_BUTTON_RIGHT {
+                    input.mouse.buttons_down |= 2;
+                    input.mouse.buttons_pressed |= 2;
                 }
                 input.mouse.position_pixels = .{ event.button.x, event.button.y };
             case SDL_MOUSEBUTTONUP;
                 if event.button.button == SDL_BUTTON_LEFT {
                     input.mouse.buttons_down &= 0xfe;
                     input.mouse.buttons_released |= 1;
+                } else if event.button.button == SDL_BUTTON_RIGHT {
+                    input.mouse.buttons_down &= 0xfd;
+                    input.mouse.buttons_released |= 2;
                 }
                 input.mouse.position_pixels = .{ event.button.x, event.button.y };
             case SDL_MOUSEWHEEL;

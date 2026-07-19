@@ -5,6 +5,22 @@ var jai_exports = null;
 var jai_context = null;
 let fetchedAssetBlob = null;
 let wasmFrameInput = null;
+const assetRequests = [null];
+const assetWatches = [null];
+
+function readWasmUtf8(data, count) {
+  const sharedBytes = new Uint8Array(jai_exports.memory.buffer, Number(data), Number(count));
+  return new TextDecoder().decode(new Uint8Array(sharedBytes));
+}
+
+jai_imports.jsLog = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const data = memory.getBigUint64(Number(params_ptr), true);
+  const count = memory.getBigUint64(Number(params_ptr) + 8, true);
+  const sharedBytes = new Uint8Array(jai_exports.memory.buffer, Number(data), Number(count));
+  const copiedBytes = new Uint8Array(sharedBytes);
+  console.log(new TextDecoder().decode(copiedBytes));
+};
 
 jai_imports.jsInstallFrameInputBuffer = (params_ptr, returns_ptr) => {
   const memory = new DataView(jai_exports.memory.buffer);
@@ -18,10 +34,12 @@ jai_imports.jsInstallFrameInputBuffer = (params_ptr, returns_ptr) => {
     keyboardPressedOffset: memory.getBigUint64(Number(params_ptr) + 48, true),
     keyboardReleasedOffset: memory.getBigUint64(Number(params_ptr) + 56, true),
     mousePositionOffset: memory.getBigUint64(Number(params_ptr) + 64, true),
-    mouseButtonsDownOffset: memory.getBigUint64(Number(params_ptr) + 72, true),
-    mouseButtonsPressedOffset: memory.getBigUint64(Number(params_ptr) + 80, true),
-    mouseButtonsReleasedOffset: memory.getBigUint64(Number(params_ptr) + 88, true),
-    movementKeyCount: memory.getBigUint64(Number(params_ptr) + 96, true),
+    mouseDeltaOffset: memory.getBigUint64(Number(params_ptr) + 72, true),
+    mouseWheelOffset: memory.getBigUint64(Number(params_ptr) + 80, true),
+    mouseButtonsDownOffset: memory.getBigUint64(Number(params_ptr) + 88, true),
+    mouseButtonsPressedOffset: memory.getBigUint64(Number(params_ptr) + 96, true),
+    mouseButtonsReleasedOffset: memory.getBigUint64(Number(params_ptr) + 104, true),
+    movementKeyCount: memory.getBigUint64(Number(params_ptr) + 112, true),
   };
 };
 
@@ -74,6 +92,9 @@ function writeWasmFrameInput(frame) {
   }
   memory.setInt32(inputAddress + Number(wasmFrameInput.mousePositionOffset), frame.mouseX, true);
   memory.setInt32(inputAddress + Number(wasmFrameInput.mousePositionOffset) + 4, frame.mouseY, true);
+  memory.setInt32(inputAddress + Number(wasmFrameInput.mouseDeltaOffset), frame.mouseDeltaX, true);
+  memory.setInt32(inputAddress + Number(wasmFrameInput.mouseDeltaOffset) + 4, frame.mouseDeltaY, true);
+  memory.setInt32(inputAddress + Number(wasmFrameInput.mouseWheelOffset), frame.mouseWheelSteps, true);
   memory.setUint8(inputAddress + Number(wasmFrameInput.mouseButtonsDownOffset), frame.mouseButtonsDown);
   memory.setUint8(inputAddress + Number(wasmFrameInput.mouseButtonsPressedOffset), frame.mouseButtonsPressed);
   memory.setUint8(inputAddress + Number(wasmFrameInput.mouseButtonsReleasedOffset), frame.mouseButtonsReleased);
@@ -115,4 +136,145 @@ jai_imports.jsCopyFetchedAssetBlob = (params_ptr, returns_ptr) => {
     Number(byteCount),
   );
   destinationBytes.set(new Uint8Array(fetchedAssetBlob));
+};
+
+jai_imports.jsAssetRequestAsync = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const data = memory.getBigUint64(Number(params_ptr), true);
+  const count = memory.getBigUint64(Number(params_ptr) + 8, true);
+  const path = readWasmUtf8(data, count);
+  const request = {
+    state: 1,
+    bytesReceived: 0n,
+    bytesTotal: 0n,
+    errorCode: 0,
+    data: null,
+  };
+  const handle = assetRequests.length;
+  assetRequests.push(request);
+  fetch(`/assets/${path}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`GET ${path} returned ${response.status}`);
+      }
+      const contentLength = response.headers.get("content-length");
+      request.bytesTotal = contentLength ? BigInt(contentLength) : 0n;
+      return response.arrayBuffer();
+    })
+    .then(dataBuffer => {
+      request.data = dataBuffer;
+      request.bytesReceived = BigInt(dataBuffer.byteLength);
+      request.bytesTotal = request.bytesReceived;
+      request.state = 2;
+    })
+    .catch(error => {
+      request.state = 3;
+      request.errorCode = 1;
+      console.error("Molecule asset request failed:", error);
+    });
+  memory.setUint32(Number(returns_ptr), handle, true);
+};
+
+jai_imports.jsAssetGetStatus = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const handle = memory.getUint32(Number(params_ptr), true);
+  const request = assetRequests[handle];
+  const state = request?.state ?? 3;
+  memory.setUint8(Number(returns_ptr), state);
+  memory.setBigUint64(Number(returns_ptr) + 8, request?.bytesReceived ?? 0n, true);
+  memory.setBigUint64(Number(returns_ptr) + 16, request?.bytesTotal ?? 0n, true);
+  memory.setUint32(Number(returns_ptr) + 24, request?.errorCode ?? 1, true);
+};
+
+jai_imports.jsAssetTakeByteCount = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const handle = memory.getUint32(Number(params_ptr), true);
+  const request = assetRequests[handle];
+  const byteCount = request?.state === 2 && request.data ? request.data.byteLength : 0;
+  memory.setBigUint64(Number(returns_ptr), BigInt(byteCount), true);
+};
+
+jai_imports.jsAssetTakeCopyAndClose = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const handle = memory.getUint32(Number(params_ptr), true);
+  const destination = memory.getBigUint64(Number(params_ptr) + 8, true);
+  const byteCount = memory.getBigUint64(Number(params_ptr) + 16, true);
+  const request = assetRequests[handle];
+  if (!request?.data || BigInt(request.data.byteLength) !== byteCount) {
+    console.error(`Molecule asset take failed for handle ${handle}.`);
+    return;
+  }
+  new Uint8Array(jai_exports.memory.buffer, Number(destination), Number(byteCount))
+    .set(new Uint8Array(request.data));
+  assetRequests[handle] = null;
+};
+
+async function readAssetWatchSnapshot(directory) {
+  const response = await fetch(`/asset-watch?directory=${encodeURIComponent(directory)}`);
+  if (!response.ok) {
+    throw new Error(`Asset watch returned ${response.status}`);
+  }
+  const files = await response.json();
+  return new Map(files.map(file => [file.path, `${file.modified_ns}:${file.size}`]));
+}
+
+jai_imports.jsWatchFileChanges = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const data = memory.getBigUint64(Number(params_ptr), true);
+  const count = memory.getBigUint64(Number(params_ptr) + 8, true);
+  const directory = readWasmUtf8(data, count);
+  const watch = { directory, snapshot: null, changes: [], polling: false };
+  const handle = assetWatches.length;
+  assetWatches.push(watch);
+  console.log(`Molecule watching asset directory: ${directory}`);
+
+  const poll = async () => {
+    if (watch.polling) return;
+    watch.polling = true;
+    try {
+      const next = await readAssetWatchSnapshot(directory);
+      if (watch.snapshot) {
+        for (const [path, fingerprint] of next) {
+          if (watch.snapshot.get(path) !== fingerprint && !watch.changes.includes(path)) {
+            watch.changes.push(path);
+            console.log(`Molecule detected asset change: ${path}`);
+          }
+        }
+      }
+      watch.snapshot = next;
+    } catch (error) {
+      console.error("Molecule asset watch failed:", error);
+    } finally {
+      watch.polling = false;
+    }
+  };
+  poll();
+  watch.timer = setInterval(poll, 250);
+  memory.setUint32(Number(returns_ptr), handle, true);
+};
+
+jai_imports.jsPullWatchChanges = (params_ptr, returns_ptr) => {
+  const memory = new DataView(jai_exports.memory.buffer);
+  const base = Number(params_ptr);
+  const handle = memory.getUint32(base, true);
+  const pathBytesAddress = Number(memory.getBigUint64(base + 8, true));
+  const pathCapacity = Number(memory.getBigUint64(base + 16, true));
+  const watch = assetWatches[handle];
+  let pathBytesUsed = 0;
+  if (watch) {
+    while (watch.changes.length) {
+      const path = watch.changes.shift();
+      const encodedPath = new TextEncoder().encode(path);
+      if (pathBytesUsed + encodedPath.byteLength + 1 > pathCapacity) {
+        watch.changes.unshift(path);
+        break;
+      }
+      new Uint8Array(jai_exports.memory.buffer, pathBytesAddress + pathBytesUsed, encodedPath.byteLength)
+        .set(encodedPath);
+      pathBytesUsed += encodedPath.byteLength;
+      memory.setUint8(pathBytesAddress + pathBytesUsed, 10);
+      pathBytesUsed += 1;
+    }
+  }
+  memory.setBigUint64(Number(returns_ptr), BigInt(pathBytesUsed), true);
 };

@@ -13,6 +13,8 @@ GRID_SPACING :: 2.2;
 WATER_MOLECULE_COUNT :: 100;
 WATER_HEIGHT :: 2.1;
 WATER_SPEED :: 1.0;
+MOUSE_BUTTON_LEFT :: 1;
+MOUSE_BUTTON_RIGHT :: 2;
 
 Water_Molecule :: struct {
     lane: s32;
@@ -53,6 +55,44 @@ camera_view_projection :: (camera: Camera, aspect_ratio: float32) -> M4f {
     view := m4_look_at(camera.position, camera.target, camera.up);
     projection := m4_perspective(camera.focal_length, aspect_ratio, camera.near_plane, camera.far_plane);
     return projection * view;
+}
+
+camera_ground_point_under_cursor :: (
+    camera: Camera,
+    mouse_position_pixels: V2i,
+    framebuffer_size_pixels: V2i,
+    ground_point: *V3f
+) -> bool {
+    if framebuffer_size_pixels.x <= 0 || framebuffer_size_pixels.y <= 0 {
+        return false;
+    }
+
+    aspect_ratio := cast(float32) framebuffer_size_pixels.x / cast(float32) framebuffer_size_pixels.y;
+    ndc_x := (2.0 * (cast(float32) mouse_position_pixels.x + 0.5) / cast(float32) framebuffer_size_pixels.x) - 1.0;
+    ndc_y := 1.0 - (2.0 * (cast(float32) mouse_position_pixels.y + 0.5) / cast(float32) framebuffer_size_pixels.y);
+    forward := normalize(camera.target - camera.position);
+    if forward == V3f.{} {
+        return false;
+    }
+    right := normalize(cross(forward, camera.up));
+    up := cross(right, forward);
+    ray_direction := normalize(
+        forward +
+        right * (ndc_x * aspect_ratio / camera.focal_length) +
+        up * (ndc_y / camera.focal_length)
+    );
+    if ray_direction.z > -0.0001 && ray_direction.z < 0.0001 {
+        return false;
+    }
+
+    distance_to_ground := -camera.position.z / ray_direction.z;
+    if distance_to_ground < 0 {
+        return false;
+    }
+
+    ground_point.* = camera.position + ray_direction * distance_to_ground;
+    ground_point.z = 0;
+    return true;
 }
 
 camera_move :: (camera: *Camera, input: *Frame_Input) {
@@ -100,11 +140,51 @@ camera_zoom :: (camera: *Camera, wheel_steps: s32) {
     camera.position = camera.target + normalize(to_camera) * distance;
 }
 
+camera_pan :: (state: *Game_State, input: *Frame_Input) {
+    if (input.mouse.buttons_released & MOUSE_BUTTON_RIGHT) != 0 {
+        state.camera_pan_active = false;
+    }
+
+    if (input.mouse.buttons_pressed & MOUSE_BUTTON_RIGHT) != 0 {
+        state.camera_pan_active = camera_ground_point_under_cursor(
+            state.camera,
+            input.mouse.position_pixels,
+            input.framebuffer_size_pixels,
+            *state.camera_pan_ground_point
+        );
+    }
+
+    if !state.camera_pan_active || (input.mouse.buttons_down & MOUSE_BUTTON_RIGHT) == 0 {
+        return;
+    }
+
+    current_ground_point: V3f;
+    if !camera_ground_point_under_cursor(
+        state.camera,
+        input.mouse.position_pixels,
+        input.framebuffer_size_pixels,
+        *current_ground_point
+    ) {
+        state.camera_pan_active = false;
+        return;
+    }
+
+    movement := state.camera_pan_ground_point - current_ground_point;
+    if movement == V3f.{} {
+        return;
+    }
+
+    state.camera.position += movement;
+    state.camera.target += movement;
+}
+
 Game_State :: struct {
     tick_count: u64;
     deterministic_seed: u64;
     quit_requested: bool;
     camera: Camera;
+    camera_pan_active: bool;
+    camera_pan_ground_point: V3f;
     water_molecules: [WATER_MOLECULE_COUNT] Water_Molecule;
     renderer: Renderer;
     store: Store;
@@ -118,6 +198,11 @@ Game_State :: struct {
     capture_qoi: [..] u8;
 }
 
+game_log :: (platform: *Platform, text: string) {
+    if !platform.system.log return;
+    platform.system.log(.{ data = text.data, count = text.count });
+}
+
 game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
     state.* = .{};
     state.deterministic_seed = seed;
@@ -127,12 +212,19 @@ game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, h
         state.water_molecules[it].lane = cast(s32) (it % GRID_ROWS);
         state.water_molecules[it].start_offset = cast(float32) (it / GRID_ROWS) * 9.0;
     }
+    game_log(platform, "Store initialization started");
     store_init(*state.store, platform);
+    game_log(platform, "Store struct initialized");
     store_load_platform_blob(*state.store, platform);
+    game_log(platform, "Store blob loaded");
     store_start_shader_watch(*state.store, platform);
+    game_log(platform, "Store initialization finished");
     gui_init(*state.gui);
+    game_log(platform, "Renderer initialization started");
     renderer_init(*state.renderer, platform, width, height, *state.store);
+    game_log(platform, "Renderer initialization finished");
     store_upload_gpu_assets(*state.store, *state.renderer, platform);
+    game_log(platform, "GPU asset upload finished");
 }
 
 game_reload :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
@@ -171,6 +263,7 @@ game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
     camera_move(*state.camera, input);
     if !state.gui.mouse_captured {
         camera_zoom(*state.camera, input.mouse.wheel_steps);
+        camera_pan(state, input);
     }
     renderer_render_game(state, input, platform);
     if input.capture_frame {

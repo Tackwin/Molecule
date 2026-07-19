@@ -853,22 +853,7 @@ jai_imports.jsAdapterRequestDevice = new WebAssembly.Suspending(async (params_pt
 			const device_idx = object_map_counter;
 			
 			device.addEventListener('uncapturederror', event => {
-				const userData1 = uncapturedExceptionsUserData1;
-				const userData2 = uncapturedExceptionsUserData2;
-
-				const string_ptr = jai_exports.context_alloc(
-					jai_context, BigInt(event.error.message.length)
-				);
-
-				jai_exports.jaiAdapterRequestDeviceErrorCallback(
-					jai_context,
-					BigInt(device_idx),
-					BigInt(string_ptr),
-					BigInt(event.error.message.length),
-					BigInt(uncapturedExceptionsCallback),
-					BigInt(uncapturedExceptionsUserData1),
-					BigInt(uncapturedExceptionsUserData2)
-				);
+				console.error("WebGPU uncaptured error:", event.error);
 			});
 	setU64(returns_ptr, 0, object_map_counter);
 });
@@ -2263,6 +2248,65 @@ jai_imports.jsBindGroupRelease = (params_ptr, returns_ptr) => {
 
 	object_map[group_idx] = null;
 }
+
+jai_imports.jsShaderModuleRelease = (params_ptr, returns_ptr) => {
+	const handle = getU64(params_ptr, 0);
+	if (handle <= 0 || !object_map[handle]) {
+		webgpu_early_return("wgpuShaderModuleRelease", `unknown shader module handle ${handle}`);
+		return;
+	}
+	object_map[handle] = null;
+};
+
+jai_imports.jsRenderPipelineRelease = (params_ptr, returns_ptr) => {
+	const handle = getU64(params_ptr, 0);
+	if (handle <= 0 || !object_map[handle]) {
+		webgpu_early_return("wgpuRenderPipelineRelease", `unknown render pipeline handle ${handle}`);
+		return;
+	}
+	object_map[handle] = null;
+};
+
+jai_imports.jsDevicePushErrorScope = (params_ptr, returns_ptr) => {
+	const device_idx = getU64(params_ptr, 0);
+	const filter = getU32(params_ptr, 8);
+	const device = object_map[device_idx];
+	if (!device) {
+		webgpu_early_return("wgpuDevicePushErrorScope", `unknown device handle ${device_idx}`);
+		return;
+	}
+	const filterNames = { 1: "validation", 2: "out-of-memory", 3: "internal" };
+	device.pushErrorScope(filterNames[filter] ?? "validation");
+};
+
+jai_imports.jsDevicePopErrorScope = new WebAssembly.Suspending(async (params_ptr, returns_ptr) => {
+	const device_idx = getU64(params_ptr, 0);
+	const message_ptr = getU64(params_ptr, 8);
+	const message_capacity = getU64(params_ptr, 16);
+	const device = object_map[device_idx];
+	if (!device) {
+		webgpu_early_return("wgpuDevicePopErrorScope", `unknown device handle ${device_idx}`);
+		setU32(returns_ptr, 0, 2);
+		setU32(returns_ptr, 4, 5);
+		setU64(returns_ptr, 8, 0);
+		return;
+	}
+	const error = await device.popErrorScope();
+	let errorType = 1;
+	if (error instanceof GPUValidationError) errorType = 2;
+	else if (typeof GPUOutOfMemoryError !== "undefined" && error instanceof GPUOutOfMemoryError) errorType = 3;
+	else if (typeof GPUInternalError !== "undefined" && error instanceof GPUInternalError) errorType = 4;
+	else if (error) errorType = 5;
+	const encoded = new TextEncoder().encode(error?.message ?? "");
+	const copyCount = Math.min(encoded.byteLength, Number(message_capacity));
+	if (copyCount > 0) {
+		new Uint8Array(jai_exports.memory.buffer, Number(message_ptr), copyCount)
+			.set(encoded.subarray(0, copyCount));
+	}
+	setU32(returns_ptr, 0, 1);
+	setU32(returns_ptr, 4, errorType);
+	setU64(returns_ptr, 8, copyCount);
+});
 
 jai_imports.jsRenderPipelineGetBindGroupLayout = (params_ptr, returns_ptr) => {
 	const pipeline_idx = getU64(params_ptr, 0);

@@ -1,6 +1,13 @@
 const canvas = document.querySelector("#game");
 let wasm;
 let wasm_frame;
+const moleculeRuntime = {
+  phase: "script-loaded",
+  initialized: false,
+  frameCount: 0,
+  paused: false,
+};
+globalThis.moleculeRuntime = moleculeRuntime;
 const movementKeyIndex = new Map([
   ["z", 0],
   ["ArrowUp", 0],
@@ -17,6 +24,9 @@ const movementPressed = new Uint8Array(5);
 const movementReleased = new Uint8Array(5);
 let mouseX = 0;
 let mouseY = 0;
+let mouseDeltaX = 0;
+let mouseDeltaY = 0;
+let mouseWheelSteps = 0;
 let mouseButtonsDown = 0;
 let mouseButtonsPressed = 0;
 let mouseButtonsReleased = 0;
@@ -35,6 +45,7 @@ function movementKeyForEvent(event) {
 }
 
 async function boot() {
+  moleculeRuntime.phase = "booting";
   if (!navigator.gpu) throw new Error("This browser does not expose WebGPU.");
   resizeCanvas();
   addEventListener("resize", resizeCanvas);
@@ -67,40 +78,89 @@ async function boot() {
       }
       movementDown[keyIndex] = 0;
     }
+    if (mouseButtonsDown & 1) {
+      mouseButtonsReleased |= 1;
+    }
+    if (mouseButtonsDown & 2) {
+      mouseButtonsReleased |= 2;
+    }
+    mouseButtonsDown = 0;
+  });
+  canvas.addEventListener("contextmenu", event => {
+    event.preventDefault();
   });
   canvas.addEventListener("mousemove", event => {
     const rect = canvas.getBoundingClientRect();
     mouseX = Math.floor((event.clientX - rect.left) * canvas.width / rect.width);
     mouseY = Math.floor((event.clientY - rect.top) * canvas.height / rect.height);
+    mouseDeltaX += Math.round(event.movementX * canvas.width / rect.width);
+    mouseDeltaY += Math.round(event.movementY * canvas.height / rect.height);
   });
+  canvas.addEventListener("wheel", event => {
+    event.preventDefault();
+    mouseWheelSteps += -Math.sign(event.deltaY);
+  }, { passive: false });
   canvas.addEventListener("mousedown", event => {
-    if (event.button !== 0) return;
-    mouseButtonsDown |= 1;
-    mouseButtonsPressed |= 1;
+    if (event.button === 0) {
+      mouseButtonsDown |= 1;
+      mouseButtonsPressed |= 1;
+      return;
+    }
+    if (event.button === 2) {
+      event.preventDefault();
+      mouseButtonsDown |= 2;
+      mouseButtonsPressed |= 2;
+    }
   });
   canvas.addEventListener("mouseup", event => {
-    if (event.button !== 0) return;
-    mouseButtonsDown &= ~1;
-    mouseButtonsReleased |= 1;
+    if (event.button === 0) {
+      mouseButtonsDown &= ~1;
+      mouseButtonsReleased |= 1;
+      return;
+    }
+    if (event.button === 2) {
+      event.preventDefault();
+      mouseButtonsDown &= ~2;
+      mouseButtonsReleased |= 2;
+    }
   });
 
-  // Jai currently emits wasm64; its imported memory therefore uses 64-bit addresses.
-  // Keep these limits in sync with the current linker output (18 64 KiB pages).
-  // Imported shared memory must not declare a larger maximum than the WASM module.
-  const memory = new WebAssembly.Memory({ initial: 23n, maximum: 23n, shared: true, address: "i64" });
+  // Jai currently emits wasm64 and Walloc owns one fixed shared heap.
+  // Keep this page count synchronized with Build.jai's 64 MiB linker limits.
+  const wasmMemoryPages = 0x400n;
+  const memory = new WebAssembly.Memory({
+    initial: wasmMemoryPages,
+    maximum: wasmMemoryPages,
+    shared: true,
+    address: "i64",
+  });
   const imports = { env: new Proxy({ ...jai_imports, memory }, { get: (target, name) => target[name] ?? (() => 0) }) };
   const response = await fetch("molecule.wasm");
   const { instance } = await WebAssembly.instantiateStreaming(response, imports);
+  moleculeRuntime.phase = "wasm-instantiated";
   wasm = instance.exports;
+  console.log(
+    "WASM tables:",
+    JSON.stringify(Object.entries(wasm)
+      .filter(([, value]) => value instanceof WebAssembly.Table)
+      .map(([name, value]) => ({ name, length: String(value.length) }))),
+  );
   jai_exports = wasm;
   jai_context = wasm.__jai_runtime_init(0, 0n);
   jai_imports.js_memory_grew();
+  moleculeRuntime.phase = "game-initializing";
   await WebAssembly.promising(wasm.wasm_init)();
   wasm_frame = WebAssembly.promising(wasm.wasm_frame);
+  moleculeRuntime.initialized = true;
+  moleculeRuntime.phase = "running";
   requestAnimationFrame(frame);
 }
 
 async function frame() {
+  if (moleculeRuntime.paused) {
+    requestAnimationFrame(frame);
+    return;
+  }
   writeWasmFrameInput({
     deltaSeconds: 1 / 60,
     windowWidth: innerWidth,
@@ -112,6 +172,9 @@ async function frame() {
     movementReleased,
     mouseX,
     mouseY,
+    mouseDeltaX,
+    mouseDeltaY,
+    mouseWheelSteps,
     mouseButtonsDown,
     mouseButtonsPressed,
     mouseButtonsReleased,
@@ -120,8 +183,16 @@ async function frame() {
   movementReleased.fill(0);
   mouseButtonsPressed = 0;
   mouseButtonsReleased = 0;
+  mouseDeltaX = 0;
+  mouseDeltaY = 0;
+  mouseWheelSteps = 0;
   await wasm_frame();
+  moleculeRuntime.frameCount += 1;
   requestAnimationFrame(frame);
 }
 
-boot().catch(error => { console.error(error); document.body.dataset.error = error.message; });
+boot().catch(error => {
+  moleculeRuntime.phase = "error";
+  console.error(error);
+  document.body.dataset.error = error.message;
+});

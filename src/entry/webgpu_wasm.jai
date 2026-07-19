@@ -124,6 +124,16 @@ wasm_wgpuDeviceCreateBindGroup :: (
     return result;
 }
 
+wasm_wgpuBindGroupRelease :: (group: WGPUBindGroup) #c_call {
+    jsBindGroupRelease :: (params: *void, returns: *void) #foreign;
+    jsBindGroupRelease(*group, null);
+}
+
+wasm_wgpuBindGroupLayoutRelease :: (layout: WGPUBindGroupLayout) #c_call {
+    jsBindGroupLayoutRelease :: (params: *void, returns: *void) #foreign;
+    jsBindGroupLayoutRelease(*layout, null);
+}
+
 wasm_wgpuDeviceCreateShaderModule :: (
     device: WGPUDevice, descriptor: *WGPUShaderModuleDescriptor
 ) -> WGPUShaderModule #c_call {
@@ -140,6 +150,62 @@ wasm_wgpuDeviceCreateShaderModule :: (
     return result;
 }
 
+wasm_wgpuShaderModuleRelease :: (shader: WGPUShaderModule) #c_call {
+    jsShaderModuleRelease :: (params: *void, returns: *void) #foreign;
+    jsShaderModuleRelease(*shader, null);
+}
+
+wasm_wgpuDevicePushErrorScope :: (device: WGPUDevice, filter: WGPUErrorFilter) #c_call {
+    jsDevicePushErrorScope :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        device: WGPUDevice;
+        filter: WGPUErrorFilter;
+        padding: u32;
+    }
+    params: Params = .{
+        device = device,
+        filter = filter,
+    };
+    jsDevicePushErrorScope(*params, null);
+}
+
+wasm_wgpuDevicePopErrorScope :: (
+    device: WGPUDevice,
+    callback_info: WGPUPopErrorScopeCallbackInfo
+) -> WGPUFuture #c_call {
+    jsDevicePopErrorScope :: (params: *void, returns: *void) #foreign;
+    message: [0x400] u8;
+    Params :: struct {
+        device: WGPUDevice;
+        message: *u8;
+        message_capacity: u64;
+    }
+    Result :: struct {
+        status: WGPUPopErrorScopeStatus;
+        error_type: WGPUErrorType;
+        message_count: u64;
+    }
+    params: Params = .{
+        device = device,
+        message = *message[0],
+        message_capacity = message.count,
+    };
+    result: Result;
+    jsDevicePopErrorScope(*params, *result);
+    message_view: WGPUStringView = .{
+        data = cast(*u8) *message[0],
+        length = result.message_count,
+    };
+    callback_info.callback(
+        result.status,
+        result.error_type,
+        message_view,
+        callback_info.userdata1,
+        callback_info.userdata2
+    );
+    return .{};
+}
+
 wasm_wgpuDeviceCreateRenderPipeline :: (
     device: WGPUDevice, descriptor: *WGPURenderPipelineDescriptor
 ) -> WGPURenderPipeline #c_call {
@@ -154,6 +220,11 @@ wasm_wgpuDeviceCreateRenderPipeline :: (
     result: WGPURenderPipeline;
     jsDeviceCreateRenderPipeline(*params, *result);
     return result;
+}
+
+wasm_wgpuRenderPipelineRelease :: (pipeline: WGPURenderPipeline) #c_call {
+    jsRenderPipelineRelease :: (params: *void, returns: *void) #foreign;
+    jsRenderPipelineRelease(*pipeline, null);
 }
 
 wasm_wgpuSurfaceConfigure :: (surface: WGPUSurface, config: *WGPUSurfaceConfiguration) #c_call {
@@ -401,8 +472,14 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuDeviceCreateTexture = wasm_wgpuDeviceCreateTexture;
     gpu.wgpuDeviceCreateSampler = wasm_wgpuDeviceCreateSampler;
     gpu.wgpuDeviceCreateBindGroup = wasm_wgpuDeviceCreateBindGroup;
+    gpu.wgpuBindGroupRelease = wasm_wgpuBindGroupRelease;
+    gpu.wgpuBindGroupLayoutRelease = wasm_wgpuBindGroupLayoutRelease;
     gpu.wgpuDeviceCreateShaderModule = wasm_wgpuDeviceCreateShaderModule;
+    gpu.wgpuShaderModuleRelease = wasm_wgpuShaderModuleRelease;
+    gpu.wgpuDevicePushErrorScope = wasm_wgpuDevicePushErrorScope;
+    gpu.wgpuDevicePopErrorScope = wasm_wgpuDevicePopErrorScope;
     gpu.wgpuDeviceCreateRenderPipeline = wasm_wgpuDeviceCreateRenderPipeline;
+    gpu.wgpuRenderPipelineRelease = wasm_wgpuRenderPipelineRelease;
     gpu.wgpuSurfaceConfigure = wasm_wgpuSurfaceConfigure;
     gpu.wgpuSurfaceGetCurrentTexture = wasm_wgpuSurfaceGetCurrentTexture;
     gpu.wgpuTextureCreateView = wasm_wgpuTextureCreateView;

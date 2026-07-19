@@ -173,7 +173,10 @@ build_wasm :: () {
         "--import-memory",
         "--shared-memory",
         "--export-memory",
+        "--export-table",
         "--stack-first",
+        "--initial-memory=67108864",
+        "--max-memory=67108864",
         "-z", "stack-size=1048576",
         "src/c/walloc.o"
     ];

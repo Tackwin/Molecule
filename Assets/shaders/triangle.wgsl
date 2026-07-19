@@ -1,3 +1,4 @@
+// Hot-reload verification marker.
 struct Camera_Data {
     view_projection: mat4x4<f32>,
 }

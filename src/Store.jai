@@ -75,7 +75,12 @@ Store :: struct {
     verdana_font: Font_Asset;
 }
 
-store_promote_qoi_texture :: (texture: *Texture_Asset, store: *Store) {
+Allocator_Proc_Bits :: union {
+    proc: Allocator_Proc;
+    bits: u64;
+}
+
+store_promote_qoi_texture :: (texture: *Texture_Asset, store: *Store, platform: *Platform) {
     if texture.asset.bytes.count == 0 || texture.pixels.count > 0 return;
     if texture.asset.bytes.count < 14 {
         texture.asset.state = .FAILED;
@@ -85,9 +90,33 @@ store_promote_qoi_texture :: (texture: *Texture_Asset, store: *Store) {
         cast(u32) texture.asset.bytes[6] * 0x00000100 + cast(u32) texture.asset.bytes[7];
     height := cast(u32) texture.asset.bytes[8] * 0x01000000 + cast(u32) texture.asset.bytes[9] * 0x00010000 +
         cast(u32) texture.asset.bytes[10] * 0x00000100 + cast(u32) texture.asset.bytes[11];
+    if platform.system.log {
+        store_allocator: Allocator_Proc_Bits;
+        store_allocator.proc = store.pool_allocator_proc;
+        platform_allocator: Allocator_Proc_Bits;
+        platform_allocator.proc = platform.system.persistent_pool_allocator_proc;
+        message := tprint(
+            "QOI atlas dimensions: %x%, store allocator null=% platform allocator null=% store_proc=% platform_proc=%",
+            width,
+            height,
+            !store.pool_allocator_proc,
+            !platform.system.persistent_pool_allocator_proc,
+            store_allocator.bits,
+            platform_allocator.bits
+        );
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
     texture.pixels.allocator = .{ store.pool_allocator_proc, *store.pool };
     array_resize(*texture.pixels, cast(int) width * height);
+    if platform.system.log {
+        message := "QOI atlas pixels allocated";
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
     info, decoded := qoi_decode(texture.asset.bytes, texture.pixels);
+    if platform.system.log {
+        message := "QOI atlas decode returned";
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
     if !decoded {
         texture.asset.state = .FAILED;
         return;
@@ -217,7 +246,7 @@ store_update_raw_asset :: (store: *Store, asset: *Store_Asset, platform: *Platfo
 store_start_shader_watch :: (store: *Store, platform: *Platform) {
     if store.shader_watch != 0 return;
     if !platform.system.watch_file_changes || !platform.system.pull_watch_changes return;
-    directory := "../Assets/shaders";
+    directory := "shaders";
     store.shader_watch = platform.system.watch_file_changes(.{
         data = directory.data,
         count = directory.count,
@@ -263,6 +292,21 @@ store_init :: (store: *Store, platform: *Platform) {
     store.sphere_mesh.asset.path = "meshes/sphere.obj";
     store.verdana_font.metrics_asset.path = "fonts/verdana.csv";
     store.verdana_font.atlas.asset.path = "fonts/verdana.qoi";
+    if platform.system.log {
+        block_allocator: Allocator_Proc_Bits;
+        block_allocator.proc = store.pool.block_allocator.proc;
+        message := tprint(
+            "Store paths: geometry=% gui=% cube=% sphere=% font_metrics=% font_atlas=% block_proc=%",
+            store.geometry_shader.asset.path,
+            store.gui_shader.asset.path,
+            store.cube_mesh.asset.path,
+            store.sphere_mesh.asset.path,
+            store.verdana_font.metrics_asset.path,
+            store.verdana_font.atlas.asset.path,
+            block_allocator.bits
+        );
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
 }
 
 store_unload :: (store: *Store) {
@@ -273,7 +317,7 @@ store_unload :: (store: *Store) {
 store_load_platform_blob :: (store: *Store, platform: *Platform) {
     blob := platform.system.try_get_asset_blob();
     if blob.count > 0 {
-        store_load_blob(store, blob);
+        store_load_blob(store, blob, platform);
     }
 }
 
@@ -290,7 +334,11 @@ store_read_u32_le :: (bytes: [] u8, offset: u64) -> u32 {
         cast(u32) bytes[offset + 3] * 0x01000000;
 }
 
-store_load_blob :: (store: *Store, blob: [] u8) {
+store_paths_equal :: (a: string, b: string) -> bool {
+    return compare(a, b) == 0;
+}
+
+store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
     if blob.count < 16 return;
     cursor: u64 = 16;
     asset_count := store_read_u32_le(blob, 12);
@@ -311,33 +359,66 @@ store_load_blob :: (store: *Store, blob: [] u8) {
             data: [] u8 = .{ data = blob.data + cursor, count = xx data_count };
             cursor += data_count;
             path_string: string = .{ data = path.data, count = path.count };
-            if path_string == store.geometry_shader.asset.path {
+            if platform.system.log {
+                message := tprint(
+                    "Store loading asset: % cube_match=% sphere_match=%",
+                    path_string,
+                    store_paths_equal(path_string, store.cube_mesh.asset.path),
+                    store_paths_equal(path_string, store.sphere_mesh.asset.path)
+                );
+                platform.system.log(.{ data = message.data, count = message.count });
+            }
+            if store_paths_equal(path_string, store.geometry_shader.asset.path) {
                 store_set_blob_asset(*store.geometry_shader.asset, data);
             }
-            if path_string == store.gui_shader.asset.path {
+            if store_paths_equal(path_string, store.gui_shader.asset.path) {
                 store_set_blob_asset(*store.gui_shader.asset, data);
             }
-            if path_string == store.cube_mesh.asset.path {
+            if store_paths_equal(path_string, store.cube_mesh.asset.path) {
                 store_set_blob_asset(*store.cube_mesh.asset, data);
+                if platform.system.log {
+                    message := "Store promoting cube mesh";
+                    platform.system.log(.{ data = message.data, count = message.count });
+                }
                 store_promote_obj_mesh(*store.cube_mesh, store);
+                if platform.system.log {
+                    message := "Store promoted cube mesh";
+                    platform.system.log(.{ data = message.data, count = message.count });
+                }
             }
-            if path_string == store.sphere_mesh.asset.path {
+            if store_paths_equal(path_string, store.sphere_mesh.asset.path) {
                 store_set_blob_asset(*store.sphere_mesh.asset, data);
+                if platform.system.log {
+                    message := "Store promoting sphere mesh";
+                    platform.system.log(.{ data = message.data, count = message.count });
+                }
                 store_promote_obj_mesh(*store.sphere_mesh, store);
+                if platform.system.log {
+                    message := "Store promoted sphere mesh";
+                    platform.system.log(.{ data = message.data, count = message.count });
+                }
             }
-            if path_string == store.verdana_font.metrics_asset.path {
+            if store_paths_equal(path_string, store.verdana_font.metrics_asset.path) {
                 store_set_blob_asset(*store.verdana_font.metrics_asset, data);
                 metrics_loaded = true;
             }
-            if path_string == store.verdana_font.atlas.asset.path {
+            if store_paths_equal(path_string, store.verdana_font.atlas.asset.path) {
                 store_set_blob_asset(*store.verdana_font.atlas.asset, data);
                 atlas_loaded = true;
             }
         }
         if atlas_loaded {
-            store_promote_qoi_texture(*store.verdana_font.atlas, store);
+            if platform.system.log {
+                message := "Store promoting font atlas";
+                platform.system.log(.{ data = message.data, count = message.count });
+            }
+            store_promote_qoi_texture(*store.verdana_font.atlas, store, platform);
         }
         if metrics_loaded || atlas_loaded {
+            if platform.system.log {
+                message := "Store promoting font metrics";
+                platform.system.log(.{ data = message.data, count = message.count });
+            }
             store_promote_font_metrics(*store.verdana_font, store);
         }
     }
