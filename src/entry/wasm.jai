@@ -8,10 +8,6 @@ wasm_platform: Platform;
 wasm_game: Game_State;
 wasm_input: Frame_Input;
 wasm_initialized := false;
-WASM_MAX_WATCH_CHANGES :: 64;
-WASM_WATCH_PATH_BYTES :: 0x4000;
-wasm_watch_changes: [WASM_MAX_WATCH_CHANGES] Watched_File_Change;
-wasm_watch_path_bytes: [WASM_WATCH_PATH_BYTES] u8;
 
 Wasm_Byte_Slice_Params :: struct {
     data: *u8;
@@ -179,53 +175,6 @@ wasm_asset_take :: (handle: Asset_Request_Handle, allocator: Allocator) -> [] u8
     return result;
 }
 
-wasm_watch_file_changes :: (directory: [] u8) -> File_Watch_Handle {
-    jsWatchFileChanges :: (params: *void, returns: *void) #foreign;
-    params: Wasm_Byte_Slice_Params = .{
-        data = directory.data,
-        count = cast(u64) directory.count,
-    };
-    result: File_Watch_Handle;
-    jsWatchFileChanges(*params, *result);
-    return result;
-}
-
-wasm_pull_watch_changes :: (handle: File_Watch_Handle) -> [] Watched_File_Change {
-    jsPullWatchChanges :: (params: *void, returns: *void) #foreign;
-    Params :: struct {
-        handle: File_Watch_Handle;
-        padding: u32;
-        path_bytes: *u8;
-        path_capacity: u64;
-    }
-    params: Params = .{
-        handle = handle,
-        path_bytes = *wasm_watch_path_bytes[0],
-        path_capacity = WASM_WATCH_PATH_BYTES,
-    };
-    path_bytes_used: u64;
-    jsPullWatchChanges(*params, *path_bytes_used);
-    change_count: s64;
-    path_start: u64;
-    if path_bytes_used > 0 {
-        for byte_index: 0..path_bytes_used - 1 {
-            if wasm_watch_path_bytes[byte_index] != #char "\n" continue;
-            if change_count >= WASM_MAX_WATCH_CHANGES break;
-            wasm_watch_changes[change_count].path = .{
-                data = *wasm_watch_path_bytes[path_start],
-                count = cast(int) (byte_index - path_start),
-            };
-            wasm_watch_changes[change_count].kind = .MODIFIED;
-            change_count += 1;
-            path_start = byte_index + 1;
-        }
-    }
-    return .{
-        data = *wasm_watch_changes[0],
-        count = cast(int) change_count,
-    };
-}
-
 #program_export context_alloc :: (ctx: *#Context, size: s64) -> *void #c_call {
     push_context, defer_pop ctx.*;
     return alloc(size);
@@ -244,8 +193,6 @@ wasm_pull_watch_changes :: (handle: File_Watch_Handle) -> [] Watched_File_Change
     wasm_platform.system.asset_request_async = wasm_asset_request_async;
     wasm_platform.system.asset_get_status = wasm_asset_get_status;
     wasm_platform.system.asset_take = wasm_asset_take;
-    wasm_platform.system.watch_file_changes = wasm_watch_file_changes;
-    wasm_platform.system.pull_watch_changes = wasm_pull_watch_changes;
     wasm_platform.system.persistent_pool_allocator_proc = wasm_pool_allocator_proc;
     wasm_install_frame_input_bridge();
     init_started := "WASM game initialization started";

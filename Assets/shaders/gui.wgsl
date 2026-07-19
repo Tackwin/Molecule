@@ -52,9 +52,6 @@ fn median(value: vec3f) -> f32 {
 @fragment
 fn fs(input: Vertex_Output) -> @location(0) vec4f {
     let instance = gui_instances[input.instance_index];
-    if (instance.kind == 0u) {
-        return instance.color;
-    }
 
     let signed_distance = median(textureSample(font_texture, font_sampler, input.uv).rgb) - 0.5;
     let pixel_range = max(fwidth(signed_distance), 0.00001);
@@ -63,5 +60,8 @@ fn fs(input: Vertex_Output) -> @location(0) vec4f {
     let outline_alpha = clamp(outline_distance / pixel_range + 0.5, 0.0, 1.0);
     let fill = vec4f(instance.color.rgb, instance.color.a * fill_alpha);
     let outline = vec4f(0.0, 0.0, 0.0, instance.color.a * (outline_alpha - fill_alpha));
+    if (instance.kind == 0u) {
+        return instance.color;
+    }
     return outline + fill;
 }

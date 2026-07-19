@@ -8,11 +8,9 @@ Then open http://localhost:8000/.
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.parse import parse_qs
 import shutil
 import mimetypes
 import os
-import json
 
 
 PORT = 8000
@@ -29,9 +27,6 @@ class MoleculeHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path.startswith("/assets/"):
             self.serve_asset_file(parsed.path[len("/assets/"):], send_body=True)
-            return
-        if parsed.path == "/asset-watch":
-            self.serve_asset_watch(parsed.query)
             return
         super().do_GET()
 
@@ -65,29 +60,6 @@ class MoleculeHandler(SimpleHTTPRequestHandler):
         if send_body:
             with asset_path.open("rb") as asset_file:
                 shutil.copyfileobj(asset_file, self.wfile)
-
-    def serve_asset_watch(self, query):
-        directory = parse_qs(query).get("directory", [""])[0]
-        directory_path = self.resolve_asset_path(directory)
-        if directory_path is None or not directory_path.is_dir():
-            self.send_error(404, "Asset directory not found")
-            return
-        files = []
-        for path in sorted(directory_path.rglob("*")):
-            if not path.is_file():
-                continue
-            stat = path.stat()
-            files.append({
-                "path": path.relative_to(ASSETS_ROOT).as_posix(),
-                "modified_ns": stat.st_mtime_ns,
-                "size": stat.st_size,
-            })
-        body = json.dumps(files, separators=(",", ":")).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
     def serve_asset_blob(self, send_body):
         if not ASSET_BLOB_PATH.is_file():

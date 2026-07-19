@@ -6,7 +6,6 @@ var jai_context = null;
 let fetchedAssetBlob = null;
 let wasmFrameInput = null;
 const assetRequests = [null];
-const assetWatches = [null];
 
 function readWasmUtf8(data, count) {
   const sharedBytes = new Uint8Array(jai_exports.memory.buffer, Number(data), Number(count));
@@ -209,72 +208,4 @@ jai_imports.jsAssetTakeCopyAndClose = (params_ptr, returns_ptr) => {
   assetRequests[handle] = null;
 };
 
-async function readAssetWatchSnapshot(directory) {
-  const response = await fetch(`/asset-watch?directory=${encodeURIComponent(directory)}`);
-  if (!response.ok) {
-    throw new Error(`Asset watch returned ${response.status}`);
-  }
-  const files = await response.json();
-  return new Map(files.map(file => [file.path, `${file.modified_ns}:${file.size}`]));
-}
 
-jai_imports.jsWatchFileChanges = (params_ptr, returns_ptr) => {
-  const memory = new DataView(jai_exports.memory.buffer);
-  const data = memory.getBigUint64(Number(params_ptr), true);
-  const count = memory.getBigUint64(Number(params_ptr) + 8, true);
-  const directory = readWasmUtf8(data, count);
-  const watch = { directory, snapshot: null, changes: [], polling: false };
-  const handle = assetWatches.length;
-  assetWatches.push(watch);
-  console.log(`Molecule watching asset directory: ${directory}`);
-
-  const poll = async () => {
-    if (watch.polling) return;
-    watch.polling = true;
-    try {
-      const next = await readAssetWatchSnapshot(directory);
-      if (watch.snapshot) {
-        for (const [path, fingerprint] of next) {
-          if (watch.snapshot.get(path) !== fingerprint && !watch.changes.includes(path)) {
-            watch.changes.push(path);
-            console.log(`Molecule detected asset change: ${path}`);
-          }
-        }
-      }
-      watch.snapshot = next;
-    } catch (error) {
-      console.error("Molecule asset watch failed:", error);
-    } finally {
-      watch.polling = false;
-    }
-  };
-  poll();
-  watch.timer = setInterval(poll, 250);
-  memory.setUint32(Number(returns_ptr), handle, true);
-};
-
-jai_imports.jsPullWatchChanges = (params_ptr, returns_ptr) => {
-  const memory = new DataView(jai_exports.memory.buffer);
-  const base = Number(params_ptr);
-  const handle = memory.getUint32(base, true);
-  const pathBytesAddress = Number(memory.getBigUint64(base + 8, true));
-  const pathCapacity = Number(memory.getBigUint64(base + 16, true));
-  const watch = assetWatches[handle];
-  let pathBytesUsed = 0;
-  if (watch) {
-    while (watch.changes.length) {
-      const path = watch.changes.shift();
-      const encodedPath = new TextEncoder().encode(path);
-      if (pathBytesUsed + encodedPath.byteLength + 1 > pathCapacity) {
-        watch.changes.unshift(path);
-        break;
-      }
-      new Uint8Array(jai_exports.memory.buffer, pathBytesAddress + pathBytesUsed, encodedPath.byteLength)
-        .set(encodedPath);
-      pathBytesUsed += encodedPath.byteLength;
-      memory.setUint8(pathBytesAddress + pathBytesUsed, 10);
-      pathBytesUsed += 1;
-    }
-  }
-  memory.setBigUint64(Number(returns_ptr), BigInt(pathBytesUsed), true);
-};
