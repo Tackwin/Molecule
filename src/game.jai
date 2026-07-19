@@ -4,13 +4,14 @@
 #import "Qoi";
 #import "renderer";
 #import "Store";
+#import "Math";
 
 GRID_COLUMNS :: 40;
 GRID_ROWS :: 15;
 GRID_SPACING :: 2.2;
 WATER_MOLECULE_COUNT :: 100;
 WATER_HEIGHT :: 2.1;
-WATER_SPEED :: 8.0;
+WATER_SPEED :: 1.0;
 
 Water_Molecule :: struct {
     lane: s32;
@@ -25,16 +26,26 @@ Camera :: struct {
     near_plane: float32;
     far_plane: float32;
     move_speed: float32;
+    zoom_speed: float32;
+    min_target_distance: float32;
+    max_target_distance: float32;
 }
 
 camera_init :: (camera: *Camera) {
-    camera.position = .{ 0.0, 62.0, 52.0 };
     camera.target = .{ 0, 0, 0 };
-    camera.up = .{ 0, 1, 0 };
+    camera.up = .{ 0, 0, 1 };
     camera.focal_length = 1.7320508;
     camera.near_plane = 0.1;
     camera.far_plane = 200.0;
-    camera.move_speed = 3.0;
+    camera.move_speed = 10.0;
+    camera.zoom_speed = 5.0;
+    camera.min_target_distance = 8.0;
+    camera.max_target_distance = 120.0;
+    theta := 70.0 * (3.14159265358979323846 / 180.0);
+    camera.position.z = xx sin(theta);
+    camera.position.y = xx cos(theta);
+    camera.position.x = 0;
+    camera.position = normalize(camera.position) * 50;
 }
 
 camera_view_projection :: (camera: Camera, aspect_ratio: float32) -> M4f {
@@ -45,9 +56,9 @@ camera_view_projection :: (camera: Camera, aspect_ratio: float32) -> M4f {
 
 camera_move :: (camera: *Camera, input: *Frame_Input) {
     forward := camera.target - camera.position;
-    forward.y = 0;
+    forward.z = 0;
     forward = normalize(forward);
-    right := normalize(cross(forward, .{ 0, 1, 0 }));
+    right := normalize(cross(forward, .{ 0, 0, 1 }));
     movement: V3f = .{};
     if input.keyboard.down[KEY_MOVE_UP] {
         movement += forward;
@@ -67,6 +78,25 @@ camera_move :: (camera: *Camera, input: *Frame_Input) {
     movement = normalize(movement) * (camera.move_speed * input.simulation_delta_seconds);
     camera.position += movement;
     camera.target += movement;
+}
+
+camera_zoom :: (camera: *Camera, wheel_steps: s32) {
+    if wheel_steps == 0 {
+        return;
+    }
+    to_camera := camera.position - camera.target;
+    distance := length(to_camera);
+    if distance == 0 {
+        return;
+    }
+    distance -= cast(float32) wheel_steps * camera.zoom_speed;
+    if distance < camera.min_target_distance {
+        distance = camera.min_target_distance;
+    }
+    if distance > camera.max_target_distance {
+        distance = camera.max_target_distance;
+    }
+    camera.position = camera.target + normalize(to_camera) * distance;
 }
 
 Game_State :: struct {
@@ -110,8 +140,8 @@ game_unload :: (state: *Game_State, platform: *Platform) {
 
 game_grid_position :: (column: s32, row: s32) -> V3f {
     x := (cast(float32) column - cast(float32) (GRID_COLUMNS - 1) * 0.5) * GRID_SPACING;
-    z := (cast(float32) row - cast(float32) (GRID_ROWS - 1) * 0.5) * GRID_SPACING;
-    return .{ x, 0, z };
+    y := (cast(float32) row - cast(float32) (GRID_ROWS - 1) * 0.5) * GRID_SPACING;
+    return .{ x, y, 0 };
 }
 
 // No wall clock, file system, socket, or random service reaches the simulation.
@@ -125,6 +155,7 @@ game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
         }
     }
     camera_move(*state.camera, input);
+    camera_zoom(*state.camera, input.mouse.wheel_steps);
     renderer_render_game(state, input, platform);
     if input.capture_frame {
         game_capture_frame(state, platform);

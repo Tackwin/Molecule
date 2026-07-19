@@ -4,10 +4,10 @@ renderer_push_water_molecule :: (renderer: *Renderer, sphere: Mesh_Asset, center
 
     oxygen_hydrogen_distance :: 1.15;
     hydrogen_x := oxygen_hydrogen_distance * 0.612217;
-    hydrogen_z := oxygen_hydrogen_distance * 0.790689;
+    hydrogen_y := oxygen_hydrogen_distance * 0.790689;
     hydrogen_scale := m4_scale(.{ 0.36, 0.36, 0.36 });
-    hydrogen_a := center + .{ hydrogen_x, 0, hydrogen_z };
-    hydrogen_b := center + .{ hydrogen_x, 0, -hydrogen_z };
+    hydrogen_a := center + .{ hydrogen_x, hydrogen_y, 0 };
+    hydrogen_b := center + .{ hydrogen_x, -hydrogen_y, 0 };
     renderer_push_mesh(renderer, sphere, m4_translation(hydrogen_a) * hydrogen_scale, .{ 0.92, 0.94, 1.0, 1.0 });
     renderer_push_mesh(renderer, sphere, m4_translation(hydrogen_b) * hydrogen_scale, .{ 0.92, 0.94, 1.0, 1.0 });
 }
@@ -18,7 +18,7 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
     for row: 0..GRID_ROWS - 1 {
         for column: 0..GRID_COLUMNS - 1 {
             position := game_grid_position(cast(s32) column, cast(s32) row);
-            model := m4_translation(position) * m4_scale(.{ 0.92, 0.35, 0.92 });
+            model := m4_translation(position) * m4_scale(.{ 0.92, 0.92, 0.35 });
             renderer_push_mesh(renderer, state.store.cube_mesh, model, .{ 0.12, 0.32, 0.45, 1.0 });
         }
     }
@@ -33,7 +33,7 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
         wrapped_distance := traveled - cast(float32) (cast(s32) (traveled / travel_distance)) * travel_distance;
         center := game_grid_position(GRID_COLUMNS - 1, it.lane);
         center.x = right_edge + 4.5 - wrapped_distance;
-        center.y = WATER_HEIGHT;
+        center.z = WATER_HEIGHT;
         if center.x >= left_edge - 4.5 {
             renderer_push_water_molecule(renderer, state.store.sphere_mesh, center);
         }

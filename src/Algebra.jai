@@ -26,6 +26,7 @@ V4f :: struct {
 }
 
 M4f :: struct {
+    // Column-major storage. Matrices transform column vectors on the left: result = matrix * vector.
     elements: [16] float32;
 }
 
@@ -111,13 +112,13 @@ m4_look_at :: (position: V3f, target: V3f, up: V3f) -> M4f {
     corrected_up := cross(right, forward);
     result := m4_identity();
     result.elements[0] = right.x;
-    result.elements[1] = right.y;
-    result.elements[2] = right.z;
-    result.elements[4] = corrected_up.x;
+    result.elements[1] = corrected_up.x;
+    result.elements[2] = -forward.x;
+    result.elements[4] = right.y;
     result.elements[5] = corrected_up.y;
-    result.elements[6] = corrected_up.z;
-    result.elements[8] = -forward.x;
-    result.elements[9] = -forward.y;
+    result.elements[6] = -forward.y;
+    result.elements[8] = right.z;
+    result.elements[9] = corrected_up.z;
     result.elements[10] = -forward.z;
     result.elements[12] = -dot(right, position);
     result.elements[13] = -dot(corrected_up, position);
