@@ -66,6 +66,10 @@ Renderer :: struct {
     gui_instance_buffer: WGPUBuffer;
     gui_bind_group: WGPUBindGroup;
     gui_font_version: u32;
+    geometry_shader_version: u32;
+    geometry_shader_attempted_version: u32;
+    gui_shader_version: u32;
+    gui_shader_attempted_version: u32;
     geometry_vertex_count: u32;
     instances: [..] Render_Instance;
     draw_batches: [..] Render_Draw_Batch;
@@ -100,6 +104,63 @@ device_ready :: (
 ) #c_call {
     renderer := userdata1.(*Renderer);
     renderer.device = device;
+}
+
+Renderer_Error_Scope_Result :: struct {
+    done: bool;
+    status: WGPUPopErrorScopeStatus;
+    error_type: WGPUErrorType;
+    message_count: u32;
+    message: [0x400] u8;
+}
+
+renderer_error_scope_ready :: (
+    status: WGPUPopErrorScopeStatus,
+    error_type: WGPUErrorType,
+    message: WGPUStringView,
+    userdata1: *void,
+    userdata2: *void
+) #c_call {
+    result := userdata1.(*Renderer_Error_Scope_Result);
+    result.status = status;
+    result.error_type = error_type;
+    result.message_count = xx message.length;
+    if result.message_count > result.message.count {
+        result.message_count = xx result.message.count;
+    }
+    if result.message_count > 0 {
+        memcpy(*result.message[0], message.data, result.message_count);
+    }
+    result.done = true;
+}
+
+renderer_push_validation_scope :: (renderer: *Renderer, platform: *Platform) -> bool {
+    if !platform.gpu.wgpuDevicePushErrorScope || !platform.gpu.wgpuDevicePopErrorScope return false;
+    platform.gpu.wgpuDevicePushErrorScope(renderer.device, .Validation);
+    return true;
+}
+
+renderer_pop_validation_scope :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    label: string
+) -> bool {
+    result: Renderer_Error_Scope_Result;
+    callback: WGPUPopErrorScopeCallbackInfo = .{};
+    callback.mode = .AllowProcessEvents;
+    callback.callback = renderer_error_scope_ready;
+    callback.userdata1 = *result;
+    platform.gpu.wgpuDevicePopErrorScope(renderer.device, callback);
+    while !result.done {
+        platform.gpu.wgpuInstanceProcessEvents(renderer.instance);
+    }
+    succeeded := result.status == .Success && result.error_type == .NoError;
+    if !succeeded && platform.system.log {
+        message: string = .{ data = *result.message[0], count = result.message_count };
+        text := tprint("% failed: %", label, message);
+        platform.system.log(.{ data = text.data, count = text.count });
+    }
+    return succeeded;
 }
 
 renderer_copy_rgba :: (renderer: *Renderer, platform: *Platform, rgba: [] u8) -> bool {
@@ -213,6 +274,12 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     if renderer.pipeline && gpu.wgpuRenderPipelineRelease {
         gpu.wgpuRenderPipelineRelease(renderer.pipeline);
     }
+    if renderer.gui_bind_group && gpu.wgpuBindGroupRelease {
+        gpu.wgpuBindGroupRelease(renderer.gui_bind_group);
+    }
+    if renderer.gui_pipeline && gpu.wgpuRenderPipelineRelease {
+        gpu.wgpuRenderPipelineRelease(renderer.gui_pipeline);
+    }
     if renderer.depth_view && gpu.wgpuTextureViewRelease {
         gpu.wgpuTextureViewRelease(renderer.depth_view);
     }
@@ -230,6 +297,12 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     }
     if renderer.instance_buffer && gpu.wgpuBufferRelease {
         gpu.wgpuBufferRelease(renderer.instance_buffer);
+    }
+    if renderer.gui_instance_buffer && gpu.wgpuBufferRelease {
+        gpu.wgpuBufferRelease(renderer.gui_instance_buffer);
+    }
+    if renderer.gui_uniform_buffer && gpu.wgpuBufferRelease {
+        gpu.wgpuBufferRelease(renderer.gui_uniform_buffer);
     }
     if renderer.geometry_buffer && gpu.wgpuBufferRelease {
         gpu.wgpuBufferRelease(renderer.geometry_buffer);
@@ -286,6 +359,202 @@ renderer_resize_depth_attachment :: (renderer: *Renderer, platform: *Platform, w
     renderer.depth_height = height;
 }
 
+renderer_create_geometry_pipeline :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    shader: *Shader_Asset
+) -> WGPURenderPipeline {
+    if shader.asset.bytes.count == 0 return null;
+    gpu := *platform.gpu;
+    source: WGPUShaderSourceWGSL = .{};
+    source.chain.sType = .ShaderSourceWGSL;
+    source.code = .{
+        data = shader.asset.bytes.data,
+        length = xx shader.asset.bytes.count,
+    };
+    shader_descriptor: WGPUShaderModuleDescriptor = .{};
+    shader_descriptor.nextInChain = *source.chain;
+    module_scope := renderer_push_validation_scope(renderer, platform);
+    shader_module := gpu.wgpuDeviceCreateShaderModule(renderer.device, *shader_descriptor);
+    module_valid := shader_module != null;
+    if module_scope {
+        module_valid = renderer_pop_validation_scope(renderer, platform, "geometry shader module") && module_valid;
+    }
+    if !module_valid {
+        if shader_module && gpu.wgpuShaderModuleRelease {
+            gpu.wgpuShaderModuleRelease(shader_module);
+        }
+        return null;
+    }
+    target: WGPUColorTargetState = .{};
+    target.format = .BGRA8Unorm;
+    target.writeMask = WGPUColorWriteMask_All;
+    fragment: WGPUFragmentState = .{};
+    fragment.module = shader_module;
+    fragment.entryPoint = to_wgpu_string("fs");
+    fragment.targetCount = 1;
+    fragment.targets = *target;
+    descriptor: WGPURenderPipelineDescriptor = .{};
+    descriptor.vertex.module = shader_module;
+    descriptor.vertex.entryPoint = to_wgpu_string("vs");
+    descriptor.primitive.topology = .TriangleList;
+    depth_stencil: WGPUDepthStencilState = .{};
+    depth_stencil.format = .Depth24Plus;
+    depth_stencil.depthWriteEnabled = .True;
+    depth_stencil.depthCompare = .Less;
+    descriptor.depthStencil = *depth_stencil;
+    descriptor.multisample.count = 1;
+    descriptor.multisample.mask = 0xffffffff;
+    descriptor.fragment = *fragment;
+    pipeline_scope := renderer_push_validation_scope(renderer, platform);
+    pipeline := gpu.wgpuDeviceCreateRenderPipeline(renderer.device, *descriptor);
+    pipeline_valid := pipeline != null;
+    if pipeline_scope {
+        pipeline_valid = renderer_pop_validation_scope(renderer, platform, "geometry shader pipeline") && pipeline_valid;
+    }
+    if gpu.wgpuShaderModuleRelease {
+        gpu.wgpuShaderModuleRelease(shader_module);
+    }
+    if !pipeline_valid {
+        if pipeline && gpu.wgpuRenderPipelineRelease {
+            gpu.wgpuRenderPipelineRelease(pipeline);
+        }
+        return null;
+    }
+    return pipeline;
+}
+
+renderer_create_gui_pipeline :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    shader: *Shader_Asset
+) -> WGPURenderPipeline {
+    if shader.asset.bytes.count == 0 return null;
+    gpu := *platform.gpu;
+    source: WGPUShaderSourceWGSL = .{};
+    source.chain.sType = .ShaderSourceWGSL;
+    source.code = .{
+        data = shader.asset.bytes.data,
+        length = xx shader.asset.bytes.count,
+    };
+    shader_descriptor: WGPUShaderModuleDescriptor = .{};
+    shader_descriptor.nextInChain = *source.chain;
+    module_scope := renderer_push_validation_scope(renderer, platform);
+    shader_module := gpu.wgpuDeviceCreateShaderModule(renderer.device, *shader_descriptor);
+    module_valid := shader_module != null;
+    if module_scope {
+        module_valid = renderer_pop_validation_scope(renderer, platform, "gui shader module") && module_valid;
+    }
+    if !module_valid {
+        if shader_module && gpu.wgpuShaderModuleRelease {
+            gpu.wgpuShaderModuleRelease(shader_module);
+        }
+        return null;
+    }
+    blend: WGPUBlendState = .{};
+    blend.color = .{ operation = .Add, srcFactor = .SrcAlpha, dstFactor = .OneMinusSrcAlpha };
+    blend.alpha = .{ operation = .Add, srcFactor = .One, dstFactor = .OneMinusSrcAlpha };
+    target: WGPUColorTargetState = .{};
+    target.format = .BGRA8Unorm;
+    target.blend = *blend;
+    target.writeMask = WGPUColorWriteMask_All;
+    fragment: WGPUFragmentState = .{};
+    fragment.module = shader_module;
+    fragment.entryPoint = to_wgpu_string("fs");
+    fragment.targetCount = 1;
+    fragment.targets = *target;
+    descriptor: WGPURenderPipelineDescriptor = .{};
+    descriptor.vertex.module = shader_module;
+    descriptor.vertex.entryPoint = to_wgpu_string("vs");
+    descriptor.primitive.topology = .TriangleList;
+    descriptor.multisample.count = 1;
+    descriptor.multisample.mask = 0xffffffff;
+    descriptor.fragment = *fragment;
+    pipeline_scope := renderer_push_validation_scope(renderer, platform);
+    pipeline := gpu.wgpuDeviceCreateRenderPipeline(renderer.device, *descriptor);
+    pipeline_valid := pipeline != null;
+    if pipeline_scope {
+        pipeline_valid = renderer_pop_validation_scope(renderer, platform, "gui shader pipeline") && pipeline_valid;
+    }
+    if gpu.wgpuShaderModuleRelease {
+        gpu.wgpuShaderModuleRelease(shader_module);
+    }
+    if !pipeline_valid {
+        if pipeline && gpu.wgpuRenderPipelineRelease {
+            gpu.wgpuRenderPipelineRelease(pipeline);
+        }
+        return null;
+    }
+    return pipeline;
+}
+
+renderer_create_geometry_bind_group :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    pipeline: WGPURenderPipeline
+) -> WGPUBindGroup {
+    if !pipeline || !renderer.camera_buffer || !renderer.geometry_buffer || !renderer.instance_buffer return null;
+    gpu := *platform.gpu;
+    geometry_bytes := cast(u64) MAX_RENDER_GEOMETRY_VERTICES * size_of(Mesh_Vertex);
+    layout := gpu.wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
+    entries: [3] WGPUBindGroupEntry;
+    for 0..entries.count - 1 {
+        entries[it] = .{};
+    }
+    entries[0].binding = 0;
+    entries[0].buffer = renderer.camera_buffer;
+    entries[0].size = size_of(Render_Camera);
+    entries[1].binding = 1;
+    entries[1].buffer = renderer.geometry_buffer;
+    entries[1].size = geometry_bytes;
+    entries[2].binding = 2;
+    entries[2].buffer = renderer.instance_buffer;
+    entries[2].size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
+    descriptor: WGPUBindGroupDescriptor = .{};
+    descriptor.layout = layout;
+    descriptor.entryCount = entries.count;
+    descriptor.entries = *entries[0];
+    bind_group := gpu.wgpuDeviceCreateBindGroup(renderer.device, *descriptor);
+    if gpu.wgpuBindGroupLayoutRelease {
+        gpu.wgpuBindGroupLayoutRelease(layout);
+    }
+    return bind_group;
+}
+
+renderer_create_gui_bind_group :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    pipeline: WGPURenderPipeline,
+    texture: *Texture_Asset
+) -> WGPUBindGroup {
+    if !pipeline || !texture.gpu_view || !texture.gpu_sampler return null;
+    gpu := *platform.gpu;
+    layout := gpu.wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
+    entries: [4] WGPUBindGroupEntry;
+    for 0..entries.count - 1 {
+        entries[it] = .{};
+    }
+    entries[0].binding = 0;
+    entries[0].buffer = renderer.gui_uniform_buffer;
+    entries[0].size = size_of(Gui_Render_Uniform);
+    entries[1].binding = 1;
+    entries[1].buffer = renderer.gui_instance_buffer;
+    entries[1].size = MAX_GUI_RENDER_INSTANCES * size_of(Gui_Render_Instance);
+    entries[2].binding = 2;
+    entries[2].textureView = texture.gpu_view;
+    entries[3].binding = 3;
+    entries[3].sampler = texture.gpu_sampler;
+    descriptor: WGPUBindGroupDescriptor = .{};
+    descriptor.layout = layout;
+    descriptor.entryCount = entries.count;
+    descriptor.entries = *entries[0];
+    bind_group := gpu.wgpuDeviceCreateBindGroup(renderer.device, *descriptor);
+    if gpu.wgpuBindGroupLayoutRelease {
+        gpu.wgpuBindGroupLayoutRelease(layout);
+    }
+    return bind_group;
+}
+
 renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, store: *Store) {
     if store.geometry_shader.asset.bytes.count == 0 || store.gui_shader.asset.bytes.count == 0 {
         return;
@@ -328,61 +597,9 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     config.alphaMode = .Opaque;
     gpu.wgpuSurfaceConfigure(renderer.surface, *config);
 
-    source: WGPUShaderSourceWGSL = .{};
-    source.chain.sType = .ShaderSourceWGSL;
-    source.code = .{ data = store.geometry_shader.asset.bytes.data, length = xx store.geometry_shader.asset.bytes.count };
-    shader_descriptor: WGPUShaderModuleDescriptor = .{};
-    shader_descriptor.nextInChain = *source.chain;
-    shader_module := gpu.wgpuDeviceCreateShaderModule(renderer.device, *shader_descriptor);
-
-    target: WGPUColorTargetState = .{};
-    target.format = .BGRA8Unorm;
-    target.writeMask = WGPUColorWriteMask_All;
-    fragment: WGPUFragmentState = .{};
-    fragment.module = shader_module;
-    fragment.entryPoint = to_wgpu_string("fs");
-    fragment.targetCount = 1;
-    fragment.targets = *target;
-    pipeline_descriptor: WGPURenderPipelineDescriptor = .{};
-    pipeline_descriptor.vertex.module = shader_module;
-    pipeline_descriptor.vertex.entryPoint = to_wgpu_string("vs");
-    pipeline_descriptor.primitive.topology = .TriangleList;
-    depth_stencil: WGPUDepthStencilState = .{};
-    depth_stencil.format = .Depth24Plus;
-    depth_stencil.depthWriteEnabled = .True;
-    depth_stencil.depthCompare = .Less;
-    pipeline_descriptor.depthStencil = *depth_stencil;
-    pipeline_descriptor.multisample.count = 1;
-    pipeline_descriptor.multisample.mask = 0xffffffff;
-    pipeline_descriptor.fragment = *fragment;
-    renderer.pipeline = gpu.wgpuDeviceCreateRenderPipeline(renderer.device, *pipeline_descriptor);
-
-    gui_source: WGPUShaderSourceWGSL = .{};
-    gui_source.chain.sType = .ShaderSourceWGSL;
-    gui_source.code = .{ data = store.gui_shader.asset.bytes.data, length = xx store.gui_shader.asset.bytes.count };
-    gui_shader_descriptor: WGPUShaderModuleDescriptor = .{};
-    gui_shader_descriptor.nextInChain = *gui_source.chain;
-    gui_shader_module := gpu.wgpuDeviceCreateShaderModule(renderer.device, *gui_shader_descriptor);
-    gui_blend: WGPUBlendState = .{};
-    gui_blend.color = .{ operation = .Add, srcFactor = .SrcAlpha, dstFactor = .OneMinusSrcAlpha };
-    gui_blend.alpha = .{ operation = .Add, srcFactor = .One, dstFactor = .OneMinusSrcAlpha };
-    gui_target: WGPUColorTargetState = .{};
-    gui_target.format = .BGRA8Unorm;
-    gui_target.blend = *gui_blend;
-    gui_target.writeMask = WGPUColorWriteMask_All;
-    gui_fragment: WGPUFragmentState = .{};
-    gui_fragment.module = gui_shader_module;
-    gui_fragment.entryPoint = to_wgpu_string("fs");
-    gui_fragment.targetCount = 1;
-    gui_fragment.targets = *gui_target;
-    gui_pipeline_descriptor: WGPURenderPipelineDescriptor = .{};
-    gui_pipeline_descriptor.vertex.module = gui_shader_module;
-    gui_pipeline_descriptor.vertex.entryPoint = to_wgpu_string("vs");
-    gui_pipeline_descriptor.primitive.topology = .TriangleList;
-    gui_pipeline_descriptor.multisample.count = 1;
-    gui_pipeline_descriptor.multisample.mask = 0xffffffff;
-    gui_pipeline_descriptor.fragment = *gui_fragment;
-    renderer.gui_pipeline = gpu.wgpuDeviceCreateRenderPipeline(renderer.device, *gui_pipeline_descriptor);
+    renderer.pipeline = renderer_create_geometry_pipeline(renderer, platform, *store.geometry_shader);
+    renderer.gui_pipeline = renderer_create_gui_pipeline(renderer, platform, *store.gui_shader);
+    if !renderer.pipeline || !renderer.gui_pipeline return;
 
     geometry_bytes := cast(u64) MAX_RENDER_GEOMETRY_VERTICES * size_of(Mesh_Vertex);
     geometry_descriptor: WGPUBufferDescriptor = .{};
@@ -408,31 +625,18 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     renderer.gui_instance_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *gui_instance_descriptor);
     renderer_resize_depth_attachment(renderer, platform, width, height);
 
-    layout := gpu.wgpuRenderPipelineGetBindGroupLayout(renderer.pipeline, 0);
-    entries: [3] WGPUBindGroupEntry;
-    for 0..2 {
-        entries[it] = .{};
-    }
-    entries[0].binding = 0;
-    entries[0].buffer = renderer.camera_buffer;
-    entries[0].size = size_of(Render_Camera);
-    entries[1].binding = 1;
-    entries[1].buffer = renderer.geometry_buffer;
-    entries[1].size = geometry_bytes;
-    entries[2].binding = 2;
-    entries[2].buffer = renderer.instance_buffer;
-    entries[2].size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
-    bind_group_descriptor: WGPUBindGroupDescriptor = .{};
-    bind_group_descriptor.layout = layout;
-    bind_group_descriptor.entryCount = entries.count;
-    bind_group_descriptor.entries = *entries[0];
-    renderer.bind_group = gpu.wgpuDeviceCreateBindGroup(renderer.device, *bind_group_descriptor);
+    renderer.bind_group = renderer_create_geometry_bind_group(renderer, platform, renderer.pipeline);
+    if !renderer.bind_group return;
 
     renderer.capture_supported = gpu.wgpuCommandEncoderCopyTextureToBuffer &&
         gpu.wgpuBufferMapAsync && gpu.wgpuBufferGetConstMappedRange && gpu.wgpuBufferUnmap;
     if renderer.capture_supported {
         renderer_resize_capture_attachment(renderer, platform, width, height);
     }
+    renderer.geometry_shader_version = store.geometry_shader.asset.version;
+    renderer.geometry_shader_attempted_version = store.geometry_shader.asset.version;
+    renderer.gui_shader_version = store.gui_shader.asset.version;
+    renderer.gui_shader_attempted_version = store.gui_shader.asset.version;
     renderer.ready = true;
 }
 
@@ -494,28 +698,93 @@ renderer_upload_texture_asset :: (renderer: *Renderer, platform: *Platform, text
     layout.rowsPerImage = texture.height;
     extent: WGPUExtent3D = .{ texture.width, texture.height, 1 };
     gpu.wgpuQueueWriteTexture(renderer.queue, *destination, texture.pixels.data, cast(u64) texture.pixels.count * size_of(Qoi_Pixel), *layout, *extent);
-    layout_handle := gpu.wgpuRenderPipelineGetBindGroupLayout(renderer.gui_pipeline, 0);
-    entries: [4] WGPUBindGroupEntry;
-    for 0..entries.count - 1 {
-        entries[it] = .{};
+    new_bind_group := renderer_create_gui_bind_group(renderer, platform, renderer.gui_pipeline, texture);
+    if !new_bind_group return false;
+    if renderer.gui_bind_group && gpu.wgpuBindGroupRelease {
+        gpu.wgpuBindGroupRelease(renderer.gui_bind_group);
     }
-    entries[0].binding = 0;
-    entries[0].buffer = renderer.gui_uniform_buffer;
-    entries[0].size = size_of(Gui_Render_Uniform);
-    entries[1].binding = 1;
-    entries[1].buffer = renderer.gui_instance_buffer;
-    entries[1].size = MAX_GUI_RENDER_INSTANCES * size_of(Gui_Render_Instance);
-    entries[2].binding = 2;
-    entries[2].textureView = texture.gpu_view;
-    entries[3].binding = 3;
-    entries[3].sampler = texture.gpu_sampler;
-    group: WGPUBindGroupDescriptor = .{};
-    group.layout = layout_handle;
-    group.entryCount = entries.count;
-    group.entries = *entries[0];
-    renderer.gui_bind_group = gpu.wgpuDeviceCreateBindGroup(renderer.device, *group);
+    renderer.gui_bind_group = new_bind_group;
     texture.gpu_uploaded_asset_version = texture.asset.version;
     return renderer.gui_bind_group != null;
+}
+
+renderer_reload_geometry_shader :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    shader: *Shader_Asset
+) -> bool {
+    renderer.geometry_shader_attempted_version = shader.asset.version;
+    new_pipeline := renderer_create_geometry_pipeline(renderer, platform, shader);
+    if !new_pipeline return false;
+    new_bind_group := renderer_create_geometry_bind_group(renderer, platform, new_pipeline);
+    if !new_bind_group {
+        if platform.gpu.wgpuRenderPipelineRelease {
+            platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
+        }
+        return false;
+    }
+    old_pipeline := renderer.pipeline;
+    old_bind_group := renderer.bind_group;
+    renderer.pipeline = new_pipeline;
+    renderer.bind_group = new_bind_group;
+    renderer.geometry_shader_version = shader.asset.version;
+    if platform.system.log {
+        message := tprint("geometry shader pipeline reloaded, version %", shader.asset.version);
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
+    if old_bind_group && platform.gpu.wgpuBindGroupRelease {
+        platform.gpu.wgpuBindGroupRelease(old_bind_group);
+    }
+    if old_pipeline && platform.gpu.wgpuRenderPipelineRelease {
+        platform.gpu.wgpuRenderPipelineRelease(old_pipeline);
+    }
+    return true;
+}
+
+renderer_reload_gui_shader :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    shader: *Shader_Asset,
+    font_atlas: *Texture_Asset
+) -> bool {
+    renderer.gui_shader_attempted_version = shader.asset.version;
+    new_pipeline := renderer_create_gui_pipeline(renderer, platform, shader);
+    if !new_pipeline return false;
+    new_bind_group := renderer_create_gui_bind_group(renderer, platform, new_pipeline, font_atlas);
+    if !new_bind_group {
+        if platform.gpu.wgpuRenderPipelineRelease {
+            platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
+        }
+        return false;
+    }
+    old_pipeline := renderer.gui_pipeline;
+    old_bind_group := renderer.gui_bind_group;
+    renderer.gui_pipeline = new_pipeline;
+    renderer.gui_bind_group = new_bind_group;
+    renderer.gui_shader_version = shader.asset.version;
+    if platform.system.log {
+        message := tprint("gui shader pipeline reloaded, version %", shader.asset.version);
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
+    if old_bind_group && platform.gpu.wgpuBindGroupRelease {
+        platform.gpu.wgpuBindGroupRelease(old_bind_group);
+    }
+    if old_pipeline && platform.gpu.wgpuRenderPipelineRelease {
+        platform.gpu.wgpuRenderPipelineRelease(old_pipeline);
+    }
+    return true;
+}
+
+renderer_reload_changed_shaders :: (renderer: *Renderer, platform: *Platform, store: *Store) {
+    if !renderer.ready return;
+    geometry_version := store.geometry_shader.asset.version;
+    if geometry_version != renderer.geometry_shader_attempted_version {
+        renderer_reload_geometry_shader(renderer, platform, *store.geometry_shader);
+    }
+    gui_version := store.gui_shader.asset.version;
+    if gui_version != renderer.gui_shader_attempted_version {
+        renderer_reload_gui_shader(renderer, platform, *store.gui_shader, *store.verdana_font.atlas);
+    }
 }
 
 renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color: V4f) {

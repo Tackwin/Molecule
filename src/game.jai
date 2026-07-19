@@ -129,6 +129,7 @@ game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, h
     }
     store_init(*state.store, platform);
     store_load_platform_blob(*state.store, platform);
+    store_start_shader_watch(*state.store, platform);
     gui_init(*state.gui);
     renderer_init(*state.renderer, platform, width, height, *state.store);
     store_upload_gpu_assets(*state.store, *state.renderer, platform);
@@ -155,6 +156,8 @@ game_grid_position :: (column: s32, row: s32) -> V3f {
 // All external facts are supplied by Frame_Input, so recording those inputs is enough to replay.
 game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
     state.tick_count += 1;
+    store_update_shader_hot_reload(*state.store, platform);
+    renderer_reload_changed_shaders(*state.renderer, platform, *state.store);
     if input.wants_quit {
         state.quit_requested = true;
         if platform.system.request_quit {

@@ -30,6 +30,19 @@ Async_Event :: struct {
 }
 
 Asset_Request_Handle :: u32;
+File_Watch_Handle :: u32;
+
+Watched_File_Change_Kind :: enum_flags u8 {
+    ADDED;
+    MODIFIED;
+    MOVED;
+    REMOVED;
+}
+
+Watched_File_Change :: struct {
+    path: [] u8;
+    kind: Watched_File_Change_Kind;
+}
 
 Asset_Request_State :: enum u8 {
     EMPTY;
@@ -105,7 +118,11 @@ WebGPU_Api :: struct {
     wgpuDeviceCreateSampler: WGPUProcDeviceCreateSampler = null;
     wgpuDeviceCreateBindGroup: WGPUProcDeviceCreateBindGroup = null;
     wgpuBindGroupRelease: WGPUProcBindGroupRelease = null;
+    wgpuBindGroupLayoutRelease: WGPUProcBindGroupLayoutRelease = null;
     wgpuDeviceCreateShaderModule: WGPUProcDeviceCreateShaderModule = null;
+    wgpuShaderModuleRelease: WGPUProcShaderModuleRelease = null;
+    wgpuDevicePushErrorScope: WGPUProcDevicePushErrorScope = null;
+    wgpuDevicePopErrorScope: WGPUProcDevicePopErrorScope = null;
     wgpuDeviceCreateRenderPipeline: WGPUProcDeviceCreateRenderPipeline = null;
     wgpuRenderPipelineRelease: WGPUProcRenderPipelineRelease = null;
     wgpuDeviceCreateCommandEncoder: WGPUProcDeviceCreateCommandEncoder = null;
@@ -147,6 +164,9 @@ Platform_System_Api :: struct {
     asset_request_async: #type (path: [] u8) -> Asset_Request_Handle = null;
     asset_get_status: #type (handle: Asset_Request_Handle) -> Asset_Request_Status = null;
     asset_take: #type (handle: Asset_Request_Handle, allocator: Allocator) -> [] u8 = null;
+    watch_file_changes: #type (directory: [] u8) -> File_Watch_Handle = null;
+    // Returned paths remain valid until the next pull for this handle.
+    pull_watch_changes: #type (handle: File_Watch_Handle) -> [] Watched_File_Change = null;
     persistent_pool_allocator_proc: Allocator_Proc = null;
     read_file_async: #type (path: [] u8, request_id: u32) = null;
     send_websocket: #type (data: [] u8, destination: u32) = null;

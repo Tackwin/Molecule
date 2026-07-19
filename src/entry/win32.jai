@@ -32,12 +32,132 @@ Win32_Asset_Request :: struct {
 
 win32_asset_requests: [64] Win32_Asset_Request;
 
+WIN32_MAX_FILE_WATCHES :: 8;
+WIN32_MAX_FILE_WATCH_CHANGES :: 0x40;
+WIN32_MAX_WATCHED_PATH_BYTES :: 0x200;
+
+Win32_File_Watcher :: File_Watcher(u32);
+
+Win32_File_Watch :: struct {
+    active: bool;
+    index: u32;
+    watcher: Win32_File_Watcher;
+    change_count: u32;
+    changes: [WIN32_MAX_FILE_WATCH_CHANGES] Watched_File_Change;
+    path_bytes: [WIN32_MAX_FILE_WATCH_CHANGES][WIN32_MAX_WATCHED_PATH_BYTES] u8;
+}
+
+win32_file_watches: [WIN32_MAX_FILE_WATCHES] Win32_File_Watch;
+
+win32_file_change_kind :: (events: File_Change_Event) -> Watched_File_Change_Kind {
+    result: Watched_File_Change_Kind;
+    if events & .ADDED result |= .ADDED;
+    if events & .MODIFIED result |= .MODIFIED;
+    if events & .MOVED result |= .MOVED;
+    if events & .REMOVED result |= .REMOVED;
+    return result;
+}
+
+win32_watched_file_changed :: (
+    watcher: *Win32_File_Watcher,
+    change: *File_Change,
+    watch_index: *u32
+) {
+    if watch_index.* >= win32_file_watches.count return;
+    slot := *win32_file_watches[watch_index.*];
+    normalized_count := min(change.full_path.count, WIN32_MAX_WATCHED_PATH_BYTES);
+    if slot.change_count > 0 {
+        for 0..slot.change_count - 1 {
+            existing := slot.changes[it];
+            if existing.path.count != normalized_count continue;
+            matches := true;
+            if normalized_count > 0 {
+                for byte_index: 0..normalized_count - 1 {
+                    byte := change.full_path.data[byte_index];
+                    if byte == #char "\\" byte = #char "/";
+                    if existing.path[byte_index] != byte {
+                        matches = false;
+                        break;
+                    }
+                }
+            }
+            if matches {
+                slot.changes[it].kind |= win32_file_change_kind(change.events);
+                return;
+            }
+        }
+    }
+    if slot.change_count >= WIN32_MAX_FILE_WATCH_CHANGES return;
+    change_index := slot.change_count;
+    if normalized_count > 0 {
+        for byte_index: 0..normalized_count - 1 {
+            byte := change.full_path.data[byte_index];
+            if byte == #char "\\" byte = #char "/";
+            slot.path_bytes[change_index][byte_index] = byte;
+        }
+    }
+    slot.changes[change_index].path = .{
+        data = *slot.path_bytes[change_index][0],
+        count = normalized_count,
+    };
+    slot.changes[change_index].kind = win32_file_change_kind(change.events);
+    slot.change_count += 1;
+}
+
+win32_watch_file_changes :: (directory: [] u8) -> File_Watch_Handle {
+    for 0..win32_file_watches.count - 1 {
+        slot := *win32_file_watches[it];
+        if slot.active continue;
+        slot.* = .{};
+        slot.index = xx it;
+        if !init(
+            *slot.watcher,
+            win32_watched_file_changed,
+            *slot.index,
+            events_to_watch = .MODIFIED | .ADDED | .MOVED | .REMOVED
+        ) {
+            slot.* = .{};
+            return 0;
+        }
+        directory_string: string = .{ data = directory.data, count = directory.count };
+        if !add_directories(*slot.watcher, directory_string) {
+            deinit(slot.watcher);
+            slot.* = .{};
+            return 0;
+        }
+        slot.active = true;
+        return cast(u32) (it + 1);
+    }
+    return 0;
+}
+
+win32_pull_watch_changes :: (handle: File_Watch_Handle) -> [] Watched_File_Change {
+    if handle == 0 || handle > win32_file_watches.count return .{};
+    slot := *win32_file_watches[handle - 1];
+    if !slot.active return .{};
+    process_changes(*slot.watcher);
+    result: [] Watched_File_Change = .{
+        data = *slot.changes[0],
+        count = slot.change_count,
+    };
+    slot.change_count = 0;
+    return result;
+}
+
+win32_shutdown_file_watches :: () {
+    for * slot: win32_file_watches {
+        if !slot.active continue;
+        deinit(slot.watcher);
+        slot.* = .{};
+    }
+}
+
 win32_asset_request_async :: (path: [] u8) -> Asset_Request_Handle {
     for 1..win32_asset_requests.count - 1 {
         request := *win32_asset_requests[it];
         if request.status.state == .EMPTY {
             path_string: string = .{ data = path.data, count = path.count };
-            data, loaded := read_entire_file(tprint("Assets/%", path_string), log_errors = false);
+            data, loaded := read_entire_file(tprint("../Assets/%", path_string), log_errors = false);
             request.data = data;
             if loaded {
                 request.status.state = .READY;
@@ -107,6 +227,11 @@ win32_map_asset_blob :: () -> Win32_Asset_Blob, bool {
 
 win32_request_quit :: () { platform_quit_requested = true; }
 
+win32_log :: (text: [] u8) {
+    message: string = .{ data = text.data, count = text.count };
+    print("%\n", message);
+}
+
 win32_write_file :: (path: [] u8, data: [] u8) -> bool {
     CreateDirectoryA("captures".data, null);
     path_string: string = .{ data = path.data, count = path.count };
@@ -146,12 +271,15 @@ win32_set_movement_key :: (input: *Frame_Input, key: SDL_Keycode, is_down: bool,
 
 make_win32_platform :: () -> Platform {
     platform: Platform;
+    platform.system.log = win32_log;
     platform.system.request_quit = win32_request_quit;
     platform.system.write_file = win32_write_file;
     platform.system.try_get_asset_blob = win32_try_get_asset_blob;
     platform.system.asset_request_async = win32_asset_request_async;
     platform.system.asset_get_status = win32_asset_get_status;
     platform.system.asset_take = win32_asset_take;
+    platform.system.watch_file_changes = win32_watch_file_changes;
+    platform.system.pull_watch_changes = win32_pull_watch_changes;
     platform.system.persistent_pool_allocator_proc = win32_pool_allocator_proc;
     return platform;
 }
@@ -319,6 +447,7 @@ main :: () {
     defer SDL_DestroyWindow(window);
 
     platform := make_win32_platform();
+    defer win32_shutdown_file_watches();
     install_win32_webgpu(*platform.gpu, window);
     asset_blob, asset_blob_loaded := win32_map_asset_blob();
     if !asset_blob_loaded return;

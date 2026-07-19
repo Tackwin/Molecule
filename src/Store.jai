@@ -67,6 +67,7 @@ Font_Asset :: struct {
 Store :: struct {
     pool: Pool;
     pool_allocator_proc: Allocator_Proc;
+    shader_watch: File_Watch_Handle;
     geometry_shader: Shader_Asset;
     gui_shader: Shader_Asset;
     cube_mesh: Mesh_Asset;
@@ -211,6 +212,45 @@ store_update_raw_asset :: (store: *Store, asset: *Store_Asset, platform: *Platfo
     } else {
         asset.state = .FAILED;
     }
+}
+
+store_start_shader_watch :: (store: *Store, platform: *Platform) {
+    if store.shader_watch != 0 return;
+    if !platform.system.watch_file_changes || !platform.system.pull_watch_changes return;
+    directory := "../Assets/shaders";
+    store.shader_watch = platform.system.watch_file_changes(.{
+        data = directory.data,
+        count = directory.count,
+    });
+}
+
+store_request_changed_shader :: (store: *Store, path: string, platform: *Platform) {
+    if ends_with(path, store.geometry_shader.asset.path) {
+        if platform.system.log {
+            message := tprint("shader file changed: %", path);
+            platform.system.log(.{ data = message.data, count = message.count });
+        }
+        store_request_raw_asset(*store.geometry_shader.asset, platform);
+    }
+    if ends_with(path, store.gui_shader.asset.path) {
+        if platform.system.log {
+            message := tprint("shader file changed: %", path);
+            platform.system.log(.{ data = message.data, count = message.count });
+        }
+        store_request_raw_asset(*store.gui_shader.asset, platform);
+    }
+}
+
+store_update_shader_hot_reload :: (store: *Store, platform: *Platform) {
+    if store.shader_watch == 0 || !platform.system.pull_watch_changes return;
+    changes := platform.system.pull_watch_changes(store.shader_watch);
+    for changes {
+        if it.kind == .REMOVED continue;
+        path: string = .{ data = it.path.data, count = it.path.count };
+        store_request_changed_shader(store, path, platform);
+    }
+    store_update_raw_asset(store, *store.geometry_shader.asset, platform);
+    store_update_raw_asset(store, *store.gui_shader.asset, platform);
 }
 
 store_init :: (store: *Store, platform: *Platform) {
