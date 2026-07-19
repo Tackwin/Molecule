@@ -14,6 +14,7 @@ wgpuDeviceGetQueue :: (d: WGPUDevice) -> WGPUQueue #foreign wgpu_native;
 wgpuDeviceRelease :: (d: WGPUDevice) #foreign wgpu_native;
 wgpuDeviceCreateBuffer :: (d: WGPUDevice, x: *WGPUBufferDescriptor) -> WGPUBuffer #foreign wgpu_native;
 wgpuDeviceCreateTexture :: (d: WGPUDevice, x: *WGPUTextureDescriptor) -> WGPUTexture #foreign wgpu_native;
+wgpuDeviceCreateSampler :: (d: WGPUDevice, x: *WGPUSamplerDescriptor) -> WGPUSampler #foreign wgpu_native;
 wgpuBufferMapAsync :: (buffer: WGPUBuffer, mode: WGPUMapMode, offset: u64, size: u64, callback: WGPUBufferMapCallbackInfo) -> WGPUFuture #foreign wgpu_native;
 wgpuBufferGetConstMappedRange :: (buffer: WGPUBuffer, offset: u64, size: u64) -> *void #foreign wgpu_native;
 wgpuBufferUnmap :: (buffer: WGPUBuffer) #foreign wgpu_native;
@@ -41,6 +42,8 @@ wgpuCommandEncoderFinish :: (e: WGPUCommandEncoder, d: *WGPUCommandBufferDescrip
 wgpuQueueSubmit :: (q: WGPUQueue, n: u64, c: *WGPUCommandBuffer) #foreign wgpu_native;
 wgpuQueueRelease :: (q: WGPUQueue) #foreign wgpu_native;
 wgpuQueueWriteBuffer :: (q: WGPUQueue, b: WGPUBuffer, o: u64, d: *void, s: u64) #foreign wgpu_native;
+wgpuQueueWriteTexture :: (q: WGPUQueue, d: *WGPUTexelCopyTextureInfo, data: *void, size: u64, l: *WGPUTexelCopyBufferLayout, e: *WGPUExtent3D) #foreign wgpu_native;
+wgpuSamplerRelease :: (sampler: WGPUSampler) #foreign wgpu_native;
 wgpuRenderPipelineGetBindGroupLayout :: (p: WGPURenderPipeline, i: u32) -> WGPUBindGroupLayout #foreign wgpu_native;
 wgpuSurfacePresent :: (s: WGPUSurface) -> WGPUStatus #foreign wgpu_native;
 
@@ -78,6 +81,7 @@ install_win32_webgpu :: (gpu: *WebGPU_Api, window: *SDL_Window) {
     gpu.wgpuDeviceRelease = wgpuDeviceRelease;
     gpu.wgpuDeviceCreateBuffer = wgpuDeviceCreateBuffer;
     gpu.wgpuDeviceCreateTexture = wgpuDeviceCreateTexture;
+    gpu.wgpuDeviceCreateSampler = wgpuDeviceCreateSampler;
     gpu.wgpuBufferMapAsync = wgpuBufferMapAsync;
     gpu.wgpuBufferGetConstMappedRange = wgpuBufferGetConstMappedRange;
     gpu.wgpuBufferUnmap = wgpuBufferUnmap;
@@ -105,6 +109,8 @@ install_win32_webgpu :: (gpu: *WebGPU_Api, window: *SDL_Window) {
     gpu.wgpuQueueSubmit = wgpuQueueSubmit;
     gpu.wgpuQueueRelease = wgpuQueueRelease;
     gpu.wgpuQueueWriteBuffer = wgpuQueueWriteBuffer;
+    gpu.wgpuQueueWriteTexture = wgpuQueueWriteTexture;
     gpu.wgpuRenderPipelineGetBindGroupLayout = wgpuRenderPipelineGetBindGroupLayout;
     gpu.wgpuSurfacePresent = wgpuSurfacePresent;
+    gpu.wgpuSamplerRelease = wgpuSamplerRelease;
 }

@@ -17,7 +17,11 @@ jai_imports.jsInstallFrameInputBuffer = (params_ptr, returns_ptr) => {
     keyboardDownOffset: memory.getBigUint64(Number(params_ptr) + 40, true),
     keyboardPressedOffset: memory.getBigUint64(Number(params_ptr) + 48, true),
     keyboardReleasedOffset: memory.getBigUint64(Number(params_ptr) + 56, true),
-    movementKeyCount: memory.getBigUint64(Number(params_ptr) + 64, true),
+    mousePositionOffset: memory.getBigUint64(Number(params_ptr) + 64, true),
+    mouseButtonsDownOffset: memory.getBigUint64(Number(params_ptr) + 72, true),
+    mouseButtonsPressedOffset: memory.getBigUint64(Number(params_ptr) + 80, true),
+    mouseButtonsReleasedOffset: memory.getBigUint64(Number(params_ptr) + 88, true),
+    movementKeyCount: memory.getBigUint64(Number(params_ptr) + 96, true),
   };
 };
 
@@ -68,6 +72,11 @@ function writeWasmFrameInput(frame) {
       frame.movementReleased[keyIndex],
     );
   }
+  memory.setInt32(inputAddress + Number(wasmFrameInput.mousePositionOffset), frame.mouseX, true);
+  memory.setInt32(inputAddress + Number(wasmFrameInput.mousePositionOffset) + 4, frame.mouseY, true);
+  memory.setUint8(inputAddress + Number(wasmFrameInput.mouseButtonsDownOffset), frame.mouseButtonsDown);
+  memory.setUint8(inputAddress + Number(wasmFrameInput.mouseButtonsPressedOffset), frame.mouseButtonsPressed);
+  memory.setUint8(inputAddress + Number(wasmFrameInput.mouseButtonsReleasedOffset), frame.mouseButtonsReleased);
 }
 
 jai_imports.jsFetchAssetBlob = new WebAssembly.Suspending(async (params_ptr, returns_ptr) => {

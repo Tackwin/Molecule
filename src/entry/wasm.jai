@@ -18,6 +18,10 @@ Wasm_Frame_Input_Bridge_Descriptor :: struct {
     keyboard_down_offset: u64;
     keyboard_pressed_offset: u64;
     keyboard_released_offset: u64;
+    mouse_position_offset: u64;
+    mouse_buttons_down_offset: u64;
+    mouse_buttons_pressed_offset: u64;
+    mouse_buttons_released_offset: u64;
     movement_key_count: u64;
 }
 
@@ -42,7 +46,11 @@ wasm_install_frame_input_bridge :: () {
     descriptor.keyboard_down_offset = member_offset(Frame_Input, "keyboard") + member_offset(Keyboard_State, "down");
     descriptor.keyboard_pressed_offset = member_offset(Frame_Input, "keyboard") + member_offset(Keyboard_State, "pressed");
     descriptor.keyboard_released_offset = member_offset(Frame_Input, "keyboard") + member_offset(Keyboard_State, "released");
-    descriptor.movement_key_count = 4;
+    descriptor.mouse_position_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "position_pixels");
+    descriptor.mouse_buttons_down_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "buttons_down");
+    descriptor.mouse_buttons_pressed_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "buttons_pressed");
+    descriptor.mouse_buttons_released_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "buttons_released");
+    descriptor.movement_key_count = KEY_TOGGLE_GUI_DEMO + 1;
     jsInstallFrameInputBuffer(*descriptor, null);
 }
 

@@ -1,5 +1,6 @@
 #import "Basic";
 #import "Windows";
+#import "Windows_Utf8";
 #import "Algebra";
 #import "platform";
 
@@ -14,23 +15,20 @@ Win32_Control :: struct {
     connected: bool;
     paused: bool;
     quit_requested: bool;
-    movement_down: [4] bool;
-    movement_pressed: [4] bool;
-    movement_released: [4] bool;
+    movement_down: [KEY_TOGGLE_GUI_DEMO + 1] bool;
+    movement_pressed: [KEY_TOGGLE_GUI_DEMO + 1] bool;
+    movement_released: [KEY_TOGGLE_GUI_DEMO + 1] bool;
     capture_enabled: bool;
+    capture_requested: bool;
     has_mouse_position: bool;
     mouse_position: V2i;
     mouse_delta: V2i;
 }
 
 win32_control_open :: (control: *Win32_Control) -> bool {
-    pipe_name: [64] u16;
-    for 0..MOLECULE_CONTROL_PIPE_NAME.count - 1 {
-        pipe_name[it] = MOLECULE_CONTROL_PIPE_NAME[it];
-    }
-    pipe_name[MOLECULE_CONTROL_PIPE_NAME.count] = 0;
+    pipe_name := utf8_to_wide(MOLECULE_CONTROL_PIPE_NAME,, allocator = temp);
     control.pipe = CreateNamedPipeW(
-        *pipe_name[0],
+        pipe_name,
         PIPE_ACCESS_INBOUND,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
         1,
@@ -88,6 +86,9 @@ win32_control_key_index :: (key: string) -> s32 {
     if key == "d" || key == "right" {
         return KEY_MOVE_RIGHT;
     }
+    if key == "f8" {
+        return KEY_TOGGLE_GUI_DEMO;
+    }
     return -1;
 }
 
@@ -108,6 +109,9 @@ win32_control_apply_command :: (control: *Win32_Control, command: string) {
     }
     if verb == "capture" {
         action := win32_control_next_token(*remaining);
+        if action == "once" {
+            control.capture_requested = true;
+        }
         if action == "start" {
             control.capture_enabled = true;
         }
@@ -197,7 +201,7 @@ win32_control_poll :: (control: *Win32_Control) {
 }
 
 win32_control_merge_input :: (control: *Win32_Control, input: *Frame_Input) {
-    for 0..3 {
+    for 0..control.movement_down.count - 1 {
         input.keyboard.down[it] = input.keyboard.down[it] || control.movement_down[it];
         input.keyboard.pressed[it] = input.keyboard.pressed[it] || control.movement_pressed[it];
         input.keyboard.released[it] = input.keyboard.released[it] || control.movement_released[it];
@@ -209,7 +213,8 @@ win32_control_merge_input :: (control: *Win32_Control, input: *Frame_Input) {
     }
     input.mouse.delta_pixels += control.mouse_delta;
     control.mouse_delta = .{};
-    input.capture_frame = control.capture_enabled;
+    input.capture_frame = control.capture_enabled || control.capture_requested;
+    control.capture_requested = false;
     input.wants_quit = input.wants_quit || control.quit_requested;
     control.quit_requested = false;
 }

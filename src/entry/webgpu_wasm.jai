@@ -97,6 +97,17 @@ wasm_wgpuDeviceCreateTexture :: (
     return result;
 }
 
+wasm_wgpuDeviceCreateSampler :: (
+    device: WGPUDevice, descriptor: *WGPUSamplerDescriptor
+) -> WGPUSampler #c_call {
+    jsDeviceCreateSampler :: (params: *void, returns: *void) #foreign;
+    Params :: struct { device: WGPUDevice; descriptor: *WGPUSamplerDescriptor; }
+    params: Params = .{ device = device, descriptor = descriptor };
+    result: WGPUSampler;
+    jsDeviceCreateSampler(*params, *result);
+    return result;
+}
+
 wasm_wgpuDeviceCreateBindGroup :: (
     device: WGPUDevice, descriptor: *WGPUBindGroupDescriptor
 ) -> WGPUBindGroup #c_call {
@@ -335,6 +346,28 @@ wasm_wgpuQueueWriteBuffer :: (
     jsQueueWriteBuffer(*params, null);
 }
 
+wasm_wgpuQueueWriteTexture :: (
+    queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: *void, data_size: u64,
+    layout: *WGPUTexelCopyBufferLayout, write_size: *WGPUExtent3D
+) #c_call {
+    jsQueueWriteTexture :: (params: *void, returns: *void) #foreign;
+    Params :: struct {
+        queue: WGPUQueue;
+        destination: *WGPUTexelCopyTextureInfo;
+        data: *void;
+        data_size: u64;
+        layout: *WGPUTexelCopyBufferLayout;
+        write_size: *WGPUExtent3D;
+    }
+    params: Params = .{ queue = queue, destination = destination, data = data, data_size = data_size, layout = layout, write_size = write_size };
+    jsQueueWriteTexture(*params, null);
+}
+
+wasm_wgpuSamplerRelease :: (sampler: WGPUSampler) #c_call {
+    jsSamplerRelease :: (params: *void, returns: *void) #foreign;
+    jsSamplerRelease(*sampler, null);
+}
+
 wasm_wgpuRenderPipelineGetBindGroupLayout :: (
     pipeline: WGPURenderPipeline, group_index: u32
 ) -> WGPUBindGroupLayout #c_call {
@@ -366,6 +399,7 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuDeviceGetQueue = wasm_wgpuDeviceGetQueue;
     gpu.wgpuDeviceCreateBuffer = wasm_wgpuDeviceCreateBuffer;
     gpu.wgpuDeviceCreateTexture = wasm_wgpuDeviceCreateTexture;
+    gpu.wgpuDeviceCreateSampler = wasm_wgpuDeviceCreateSampler;
     gpu.wgpuDeviceCreateBindGroup = wasm_wgpuDeviceCreateBindGroup;
     gpu.wgpuDeviceCreateShaderModule = wasm_wgpuDeviceCreateShaderModule;
     gpu.wgpuDeviceCreateRenderPipeline = wasm_wgpuDeviceCreateRenderPipeline;
@@ -383,6 +417,8 @@ install_wasm_webgpu :: (gpu: *WebGPU_Api) {
     gpu.wgpuCommandEncoderFinish = wasm_wgpuCommandEncoderFinish;
     gpu.wgpuQueueSubmit = wasm_wgpuQueueSubmit;
     gpu.wgpuQueueWriteBuffer = wasm_wgpuQueueWriteBuffer;
+    gpu.wgpuQueueWriteTexture = wasm_wgpuQueueWriteTexture;
     gpu.wgpuRenderPipelineGetBindGroupLayout = wasm_wgpuRenderPipelineGetBindGroupLayout;
     gpu.wgpuSurfacePresent = wasm_wgpuSurfacePresent;
+    gpu.wgpuSamplerRelease = wasm_wgpuSamplerRelease;
 }

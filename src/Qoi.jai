@@ -35,6 +35,18 @@ qoi_pixels_equal :: (a: Qoi_Pixel, b: Qoi_Pixel) -> bool {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
 
+qoi_flip_vertical :: (pixels: [] Qoi_Pixel, width: u32, height: u32) {
+    if cast(u64) width * height != xx pixels.count return;
+    for y: 0..height / 2 - 1 {
+        opposite_y := height - 1 - y;
+        for x: 0..width - 1 {
+            top_index := x + y * width;
+            bottom_index := x + opposite_y * width;
+            pixels[top_index], pixels[bottom_index] = pixels[bottom_index], pixels[top_index];
+        }
+    }
+}
+
 qoi_add_delta :: (value: u8, delta: s32) -> u8 {
     result := cast(s32) value + delta;
     if result < 0 {

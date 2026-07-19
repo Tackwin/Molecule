@@ -7,16 +7,55 @@
 Asset_Blob_Header :: struct {
     magic: [8] u8;
     version: u32;
-    file_count: u32;
+    asset_count: u32;
 }
 
 Asset_Blob_Entry :: struct {
+    path_count: u32;
+}
+
+Asset_Blob_Path :: struct {
     path_bytes: u32;
     data_bytes: u32;
 }
 
+Asset_Blob_Group :: struct {
+    stem: string;
+    paths: [..] string;
+}
+
+asset_blob_stem :: (path: string) -> string {
+    stem_end := path.count;
+    for 0..path.count - 1 {
+        if path.data[it] == #char "." {
+            stem_end = it;
+        }
+    }
+    return .{ data = path.data, count = stem_end };
+}
+
 build_assets_blob :: () {
     files := file_list("Assets", recursive = true);
+    groups: [..] Asset_Blob_Group;
+    groups.allocator = temp;
+    for files {
+        relative_path := advance(it, "Assets/".count);
+        stem := asset_blob_stem(relative_path);
+        group: *Asset_Blob_Group;
+        for *candidate: groups {
+            if candidate.stem == stem {
+                group = candidate;
+                break;
+            }
+        }
+        if !group {
+            array_add(*groups, .{ stem = stem });
+            group = *groups[groups.count - 1];
+            group.paths.allocator = temp;
+        }
+        array_add(*group.paths, relative_path);
+    }
+
     output, success := file_open("build/assets.blob", for_writing = true, keep_existing_content = false);
     if !success return;
     defer file_close(*output);
@@ -29,25 +68,31 @@ build_assets_blob :: () {
     header.magic[5] = 83;
     header.magic[6] = 69;
     header.magic[7] = 84;
-    header.version = 1;
-    header.file_count = xx files.count;
+    header.version = 2;
+    header.asset_count = xx groups.count;
     file_write(*output, *header, size_of(Asset_Blob_Header));
-    for files {
-        data, data_success := read_entire_file(it, log_errors = true);
-        if !data_success continue;
-        relative_path := advance(it, "Assets/".count);
+    for groups {
         entry: Asset_Blob_Entry;
-        entry.path_bytes = xx relative_path.count;
-        entry.data_bytes = xx data.count;
+        entry.path_count = xx it.paths.count;
         file_write(*output, *entry, size_of(Asset_Blob_Entry));
-        file_write(*output, relative_path.data, relative_path.count);
-        file_write(*output, data.data, data.count);
+        for it.paths {
+            data, data_success := read_entire_file(tprint("Assets/%", it), log_errors = true);
+            if !data_success return;
+            path: Asset_Blob_Path;
+            path.path_bytes = xx it.count;
+            path.data_bytes = xx data.count;
+            file_write(*output, *path, size_of(Asset_Blob_Path));
+            file_write(*output, it.data, it.count);
+            file_write(*output, data.data, data.count);
+        }
     }
 }
 
 configure_common :: (workspace: Workspace) {
+    seed := get_build_options();
     options := get_build_options(workspace);
     options.output_path = "./build/";
+    options.Commonly_Propagated = seed.Commonly_Propagated;
 
     paths: [..] string;
     paths.allocator = temp;
@@ -138,16 +183,6 @@ build_wasm :: () {
     copy_file("build/assets.blob", "web/assets.blob");
 }
 
-build_qoi_test :: () {
-    workspace := compiler_create_workspace("Molecule QOI Test");
-    configure_common(workspace);
-    options := get_build_options(workspace);
-    options.output_type = .EXECUTABLE;
-    options.output_executable_name = "qoi_test";
-    set_build_options(options, workspace);
-    compile_workspace(workspace, "src/entry/qoi_test.jai");
-}
-
 build :: () {
     set_build_options_dc(.{ do_output = false });
     args := get_build_options().compile_time_command_line;
@@ -155,15 +190,15 @@ build :: () {
     wants_win32_game := false;
     wants_win32_launcher := false;
     wants_wasm := false;
-    wants_qoi_test := false;
     for args {
         wants_win32 |= compare(it, "win32") == 0;
         wants_win32_game |= compare(it, "win32-game") == 0;
         wants_win32_launcher |= compare(it, "win32-launcher") == 0;
         wants_wasm |= compare(it, "wasm") == 0;
-        wants_qoi_test |= compare(it, "qoi-test") == 0;
     }
-    if !wants_win32 && !wants_win32_game && !wants_win32_launcher && !wants_wasm && !wants_qoi_test wants_win32 = true;
+    if !wants_win32 && !wants_win32_game && !wants_win32_launcher && !wants_wasm {
+        wants_win32 = true;
+    }
     if wants_win32 {
         build_win32();
     } else if wants_win32_game || wants_win32_launcher {
@@ -172,7 +207,6 @@ build :: () {
         if wants_win32_launcher build_win32_launcher();
     }
     if wants_wasm build_wasm();
-    if wants_qoi_test build_qoi_test();
 }
 
 #run build();

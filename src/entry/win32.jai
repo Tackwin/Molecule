@@ -11,7 +11,7 @@
 
 platform_quit_requested := false;
 win32_asset_blob: [] u8;
-win32_sdl_movement_down: [4] bool;
+win32_sdl_movement_down: [KEY_TOGGLE_GUI_DEMO + 1] bool;
 
 CreateDirectoryA :: (path: *u8, security_attributes: *void) -> BOOL #foreign kernel32;
 
@@ -182,7 +182,10 @@ win32_set_movement_key :: (input: *Frame_Input, key: SDL_Keycode, is_down: bool,
     if key == SDLK_d || key == SDLK_RIGHT {
         index = KEY_MOVE_RIGHT;
     }
-    if index < 0 {
+    if key == SDLK_F8 {
+        index = KEY_TOGGLE_GUI_DEMO;
+    }
+    if index < 0 || index >= win32_sdl_movement_down.count {
         return;
     }
     win32_sdl_movement_down[index] = is_down;
@@ -210,7 +213,7 @@ poll_win32_input :: (window: *SDL_Window, input: *Frame_Input) {
         input.keyboard.pressed[it] = false;
         input.keyboard.released[it] = false;
     }
-    for 0..3 {
+    for 0..win32_sdl_movement_down.count - 1 {
         input.keyboard.down[it] = win32_sdl_movement_down[it];
     }
     input.mouse.delta_pixels = .{};
@@ -244,6 +247,18 @@ poll_win32_input :: (window: *SDL_Window, input: *Frame_Input) {
             case SDL_MOUSEMOTION;
                 input.mouse.position_pixels = .{ event.motion.x, event.motion.y };
                 input.mouse.delta_pixels = .{ event.motion.xrel, event.motion.yrel };
+            case SDL_MOUSEBUTTONDOWN;
+                if event.button.button == SDL_BUTTON_LEFT {
+                    input.mouse.buttons_down |= 1;
+                    input.mouse.buttons_pressed |= 1;
+                }
+                input.mouse.position_pixels = .{ event.button.x, event.button.y };
+            case SDL_MOUSEBUTTONUP;
+                if event.button.button == SDL_BUTTON_LEFT {
+                    input.mouse.buttons_down &= 0xfe;
+                    input.mouse.buttons_released |= 1;
+                }
+                input.mouse.position_pixels = .{ event.button.x, event.button.y };
             case SDL_MOUSEWHEEL;
                 input.mouse.wheel_steps = event.wheel.y;
         }

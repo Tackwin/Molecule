@@ -4,6 +4,7 @@
 #import "Qoi";
 #import "renderer";
 #import "Store";
+#import "GUI";
 #import "Math";
 
 GRID_COLUMNS :: 40;
@@ -107,6 +108,10 @@ Game_State :: struct {
     water_molecules: [WATER_MOLECULE_COUNT] Water_Molecule;
     renderer: Renderer;
     store: Store;
+    gui: GUI_State;
+    gui_demo_open: bool;
+    gui_demo_checkbox: bool;
+    gui_demo_slider: float32;
     capture_frame_index: u64;
     capture_rgba: [..] u8;
     capture_pixels: [..] Qoi_Pixel;
@@ -116,6 +121,7 @@ Game_State :: struct {
 game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
     state.* = .{};
     state.deterministic_seed = seed;
+    state.gui_demo_slider = 0.65;
     camera_init(*state.camera);
     for 0..WATER_MOLECULE_COUNT - 1 {
         state.water_molecules[it].lane = cast(s32) (it % GRID_ROWS);
@@ -123,7 +129,8 @@ game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, h
     }
     store_init(*state.store, platform);
     store_load_platform_blob(*state.store, platform);
-    renderer_init(*state.renderer, platform, width, height, *state.store.geometry_shader);
+    gui_init(*state.gui);
+    renderer_init(*state.renderer, platform, width, height, *state.store);
     store_upload_gpu_assets(*state.store, *state.renderer, platform);
 }
 
@@ -154,8 +161,14 @@ game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
             platform.system.request_quit();
         }
     }
+    gui_begin_frame(*state.gui, input, *state.store.verdana_font);
+    if input.keyboard.pressed[KEY_TOGGLE_GUI_DEMO] {
+        state.gui_demo_open = !state.gui_demo_open;
+    }
     camera_move(*state.camera, input);
-    camera_zoom(*state.camera, input.mouse.wheel_steps);
+    if !state.gui.mouse_captured {
+        camera_zoom(*state.camera, input.mouse.wheel_steps);
+    }
     renderer_render_game(state, input, platform);
     if input.capture_frame {
         game_capture_frame(state, platform);

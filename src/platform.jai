@@ -13,6 +13,7 @@ KEY_MOVE_UP    :: 0;
 KEY_MOVE_LEFT  :: 1;
 KEY_MOVE_DOWN  :: 2;
 KEY_MOVE_RIGHT :: 3;
+KEY_TOGGLE_GUI_DEMO :: 4;
 
 Async_Event_Kind :: enum u8 {
     NONE;
@@ -101,6 +102,7 @@ WebGPU_Api :: struct {
     wgpuDeviceRelease: WGPUProcDeviceRelease = null;
     wgpuDeviceCreateBuffer: WGPUProcDeviceCreateBuffer = null;
     wgpuDeviceCreateTexture: WGPUProcDeviceCreateTexture = null;
+    wgpuDeviceCreateSampler: WGPUProcDeviceCreateSampler = null;
     wgpuDeviceCreateBindGroup: WGPUProcDeviceCreateBindGroup = null;
     wgpuBindGroupRelease: WGPUProcBindGroupRelease = null;
     wgpuDeviceCreateShaderModule: WGPUProcDeviceCreateShaderModule = null;
@@ -117,6 +119,7 @@ WebGPU_Api :: struct {
     wgpuQueueSubmit: WGPUProcQueueSubmit = null;
     wgpuQueueRelease: WGPUProcQueueRelease = null;
     wgpuQueueWriteBuffer: WGPUProcQueueWriteBuffer = null;
+    wgpuQueueWriteTexture: WGPUProcQueueWriteTexture = null;
     wgpuBufferMapAsync: WGPUProcBufferMapAsync = null;
     wgpuBufferGetConstMappedRange: WGPUProcBufferGetConstMappedRange = null;
     wgpuBufferUnmap: WGPUProcBufferUnmap = null;
@@ -130,6 +133,7 @@ WebGPU_Api :: struct {
     wgpuTextureCreateView: WGPUProcTextureCreateView = null;
     wgpuTextureRelease: WGPUProcTextureRelease = null;
     wgpuTextureViewRelease: WGPUProcTextureViewRelease = null;
+    wgpuSamplerRelease: WGPUProcSamplerRelease = null;
     wgpuRenderPassEncoderRelease: WGPUProcRenderPassEncoderRelease = null;
     wgpuCommandEncoderRelease: WGPUProcCommandEncoderRelease = null;
     wgpuCommandBufferRelease: WGPUProcCommandBufferRelease = null;
