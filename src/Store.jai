@@ -91,13 +91,13 @@ store_promote_qoi_texture :: (texture: *Texture_Asset, store: *Store) {
         texture.asset.state = .FAILED;
         return;
     }
-    qoi_flip_vertical(texture.pixels, info.width, info.height);
     texture.width = info.width;
     texture.height = info.height;
 }
 
 store_promote_font_metrics :: (font: *Font_Asset, store: *Store) {
     if font.metrics_asset.bytes.count == 0 return;
+    if font.atlas.width == 0 || font.atlas.height == 0 return;
     if font.glyphs[65].advance != 0 return;
     text: string = .{ data = font.metrics_asset.bytes.data, count = font.metrics_asset.bytes.count };
     while text.count > 0 {
@@ -113,11 +113,13 @@ store_promote_font_metrics :: (font: *Font_Asset, store: *Store) {
         if !scan2(line, "%,%,%,%,%,%,%,%,%,%", *unicode, *glyph.advance, *glyph.plane_x, *glyph.plane_y,
             *glyph.plane_width, *glyph.plane_height, *atlas_x, *atlas_y, *atlas_width, *atlas_height) continue;
         if unicode < 0 || unicode >= font.glyphs.count continue;
+        atlas_pixel_width := cast(float32) font.atlas.width;
+        atlas_pixel_height := cast(float32) font.atlas.height;
         glyph.uv_rect = .{
-            atlas_x / 1024.0,
-            atlas_height / 1024.0,
-            (atlas_width - atlas_x) / 1024.0,
-            (atlas_y - atlas_height) / 1024.0,
+            atlas_x / atlas_pixel_width,
+            (atlas_pixel_height - atlas_height) / atlas_pixel_height,
+            (atlas_width - atlas_x) / atlas_pixel_width,
+            (atlas_height - atlas_y) / atlas_pixel_height,
         };
         font.glyphs[unicode] = glyph;
     }
@@ -292,11 +294,11 @@ store_load_blob :: (store: *Store, blob: [] u8) {
                 atlas_loaded = true;
             }
         }
-        if metrics_loaded {
-            store_promote_font_metrics(*store.verdana_font, store);
-        }
         if atlas_loaded {
             store_promote_qoi_texture(*store.verdana_font.atlas, store);
+        }
+        if metrics_loaded || atlas_loaded {
+            store_promote_font_metrics(*store.verdana_font, store);
         }
     }
 }

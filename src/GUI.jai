@@ -282,7 +282,7 @@ gui_prepare_text :: (gui: *GUI_State, text: string, scale: float32 = 16) -> Gui_
                 if gui.prepared_glyph_count < gui.prepared_glyphs.count {
                     prepared := *gui.prepared_glyphs[gui.prepared_glyph_count];
                     prepared.* = .{
-                        position_offset_pixels = .{ cursor_x + glyph.plane_x * scale, glyph.plane_y * scale },
+                        position_offset_pixels = .{ cursor_x + glyph.plane_x * scale, -glyph.plane_height * scale },
                         size_pixels = .{ (glyph.plane_width - glyph.plane_x) * scale, (glyph.plane_height - glyph.plane_y) * scale },
                         uv_rect = glyph.uv_rect,
                     };

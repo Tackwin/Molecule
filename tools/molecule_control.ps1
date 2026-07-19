@@ -39,6 +39,7 @@ try {
     if ($response.StartsWith("error ")) {
         exit 1
     }
+    exit 0
 }
 finally {
     $pipe.Dispose()
