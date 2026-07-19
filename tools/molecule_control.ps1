@@ -10,7 +10,7 @@ $line = ((@($Command) + $Arguments) -join " ").Trim()
 $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
     ".",
     "MoleculeControl",
-    [System.IO.Pipes.PipeDirection]::Out
+    [System.IO.Pipes.PipeDirection]::InOut
 )
 
 try {
@@ -28,8 +28,17 @@ try {
         throw "Could not connect to the MoleculeControl pipe within five seconds."
     }
     $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.UTF8Encoding]::new($false))
+    $writer.AutoFlush = $true
     $writer.WriteLine($line)
-    $writer.Flush()
+    $reader = [System.IO.StreamReader]::new($pipe, [System.Text.UTF8Encoding]::new($false))
+    $response = $reader.ReadLine()
+    if ($null -eq $response) {
+        throw "MoleculeControl closed without a response."
+    }
+    Write-Output $response
+    if ($response.StartsWith("error ")) {
+        exit 1
+    }
 }
 finally {
     $pipe.Dispose()

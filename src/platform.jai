@@ -143,7 +143,6 @@ Platform_System_Api :: struct {
     log: #type (text: [] u8) = null;
     request_quit: #type () = null;
     write_file: #type (path: [] u8, data: [] u8) -> bool = null;
-    capture_rgba: #type (width: u32, height: u32, rgba: [] u8) -> bool = null;
     try_get_asset_blob: #type () -> [] u8 = null;
     asset_request_async: #type (path: [] u8) -> Asset_Request_Handle = null;
     asset_get_status: #type (handle: Asset_Request_Handle) -> Asset_Request_Status = null;

@@ -113,7 +113,15 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
         gui_pop_layout(*state.gui);
         gui_pop_layout(*state.gui);
     }
-    renderer_draw(renderer, platform, camera, *state.gui, xx input.framebuffer_size_pixels.x, xx input.framebuffer_size_pixels.y);
+    renderer_draw(
+        renderer,
+        platform,
+        camera,
+        *state.gui,
+        xx input.framebuffer_size_pixels.x,
+        xx input.framebuffer_size_pixels.y,
+        input.capture_frame
+    );
     gui_end_frame(*state.gui);
 }
 
