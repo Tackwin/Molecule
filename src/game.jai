@@ -218,7 +218,10 @@ game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, h
     log(platform, "Renderer initialization started");
     renderer_init(*state.renderer, platform, width, height, *state.store);
     log(platform, "Renderer initialization finished");
-    store_upload_gpu_assets(*state.store, *state.renderer, platform);
+    if !store_upload_gpu_assets(*state.store, *state.renderer, platform) {
+        log(platform, "GPU asset upload failed");
+        return;
+    }
     log(platform, "GPU asset upload finished");
 }
 

@@ -171,122 +171,103 @@ store_promote_font_metrics :: (font: *Font_Asset, store: *Store) {
 }
 
 store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
-    Obj_Face_Corner :: struct {
-        position_index: s64;
-        normal_index: s64;
-        has_normal: bool;
-    }
-
-    parse_face_corner :: (text: string) -> Obj_Face_Corner, bool {
-        has_first_slash, position_text, after_position := split_from_left(text, #char "/");
-        position_index, position_parsed := parse_index(position_text);
-        if !position_parsed return .{}, false;
-        if !has_first_slash return .{ position_index = position_index }, true;
-
-        has_second_slash, ignored_texture_text, normal_text := split_from_left(after_position, #char "/");
-        if !has_second_slash return .{ position_index = position_index }, true;
-        normal_index, normal_parsed := parse_index(normal_text);
-        if !normal_parsed return .{}, false;
-        return .{
-            position_index = position_index,
-            normal_index = normal_index,
-            has_normal = true,
-        }, true;
-    }
-
-    resolve_index :: (obj_index: s64, count: int) -> int, bool {
-        index := obj_index;
-        if index > 0 {
-            index -= 1;
-        } else if index < 0 {
-            index = count + index;
-        } else {
-            return 0, false;
-        }
-        if index < 0 || index >= count return 0, false;
-        return cast(int) index, true;
-    }
-
-    fail :: () {
-        mesh.asset.state = .FAILED;
-    }
-
     if mesh.asset.bytes.count == 0 || mesh.vertices.count > 0 return;
-    allocator: Allocator = .{ store.pool_allocator_proc, *store.pool };
-    mesh.vertices.allocator = allocator;
+    mesh.vertices.allocator = .{ store.pool_allocator_proc, *store.pool };
     positions: [..] V3f;
-    positions.allocator = allocator;
+    positions.allocator = temp;
     normals: [..] V3f;
-    normals.allocator = allocator;
+    normals.allocator = temp;
+    uvs: [..] V2f;
+    uvs.allocator = temp;
     text: string = .{ data = mesh.asset.bytes.data, count = mesh.asset.bytes.count };
-    while text.count > 0 {
-        line := trim(next_line(*text), " \t\r");
-        if line.count == 0 || line.data[0] == #char "#" continue;
-        remaining := line;
-        keyword := next_token(*remaining);
-        if keyword == "v" {
-            position: V3f;
-            if !scan2(line, "v % % %", *position.x, *position.y, *position.z) {
-                fail();
-                return;
-            }
+
+    lines := split(text, #char "\n",, temp);
+    for lines {
+        line := trim(it, " \t\r");
+        if line.count == 0 || line.data[0] == #char "#"
+            continue;
+
+        position: V3f;
+        normal: V3f;
+        uv: V2f;
+        if scan2(line, "v % % %", *position.x, *position.y, *position.z) {
             array_add(*positions, position);
             continue;
         }
-        if keyword == "vn" {
-            normal: V3f;
-            if !scan2(line, "vn % % %", *normal.x, *normal.y, *normal.z) {
-                fail();
-                return;
-            }
+        if scan2(line, "vn % % %", *normal.x, *normal.y, *normal.z) {
             array_add(*normals, normal);
             continue;
         }
-        if keyword != "f" continue;
-
-        corners: [3] Obj_Face_Corner;
-        for 0..2 {
-            corner, parsed := parse_face_corner(next_token(*remaining));
-            if !parsed {
-                fail();
-                return;
-            }
-            corners[it] = corner;
-        }
-        if next_token(*remaining).count != 0 {
-            fail();
-            return;
+        if scan2(line, "vt % %", *uv.x, *uv.y) {
+            array_add(*uvs, uv);
+            continue;
         }
 
-        position_indices: [3] int;
-        for 0..2 {
-            position_index, resolved := resolve_index(corners[it].position_index, positions.count);
-            if !resolved {
-                fail();
-                return;
-            }
-            position_indices[it] = position_index;
-        }
+        v_indices: [3] int;
+        n_indices: [3] int;
+        t_indices: [3] int;
+        if scan2(
+            line,
+            "f %/%/% %/%/% %/%/%",
+            *v_indices[0], *t_indices[0], *n_indices[0],
+            *v_indices[1], *t_indices[1], *n_indices[1],
+            *v_indices[2], *t_indices[2], *n_indices[2]
+        ) {
+            ok := true;
+            for 0..2
+                ok &= 0 < v_indices[it] && v_indices[it] <= positions.count
+                    && 0 < n_indices[it] && n_indices[it] <= normals.count
+                    && 0 < t_indices[it] && t_indices[it] <= uvs.count;
+            if !ok
+                continue;
 
-        a := positions[position_indices[0]];
-        b := positions[position_indices[1]];
-        c := positions[position_indices[2]];
-        face_normal := normalize(cross(b - a, c - a));
-        for 0..2 {
-            normal := face_normal;
-            if corners[it].has_normal {
-                normal_index, resolved := resolve_index(corners[it].normal_index, normals.count);
-                if !resolved {
-                    fail();
-                    return;
-                }
-                normal = normals[normal_index];
+            for 0..2 {
+                v: Mesh_Vertex;
+                v.position = positions[v_indices[it] - 1];
+                v.normal = normals[n_indices[it] - 1];
+                array_add(*mesh.vertices, v);
             }
-            array_add(*mesh.vertices, .{ position = positions[position_indices[it]], normal = normal });
+            continue;
+        }
+        if scan2(line, "f %//% %//% %//%", *v_indices[0], *n_indices[0], *v_indices[1], *n_indices[1], *v_indices[2],
+            *n_indices[2]) {
+            ok := true;
+            for 0..2
+                ok &= 0 < v_indices[it] && v_indices[it] <= positions.count
+                    && 0 < n_indices[it] && n_indices[it] <= normals.count;
+            if !ok
+                continue;
+
+            for 0..2 {
+                v: Mesh_Vertex;
+                v.position = positions[v_indices[it] - 1];
+                v.normal = normals[n_indices[it] - 1];
+                array_add(*mesh.vertices, v);
+            }
+            continue;
+        }
+        if scan2(line, "f % % %", *v_indices[0], *v_indices[1], *v_indices[2]) {
+            ok := true;
+            for 0..2
+                ok &= 0 < v_indices[it] && v_indices[it] <= positions.count;
+            if !ok
+                continue;
+
+            face_normal := normalize(cross(
+                positions[v_indices[1] - 1] - positions[v_indices[0] - 1],
+                positions[v_indices[2] - 1] - positions[v_indices[0] - 1]
+            ));
+            for 0..2 {
+                v: Mesh_Vertex;
+                v.position = positions[v_indices[it] - 1];
+                v.normal = face_normal;
+                array_add(*mesh.vertices, v);
+            }
+            continue;
         }
     }
     if mesh.vertices.count == 0 {
-        fail();
+        mesh.asset.state = .FAILED;
     }
 }
 
