@@ -73,6 +73,7 @@ Store :: struct {
 
     geometry_shader: Shader_Asset;
     gui_shader: Shader_Asset;
+    post_shader: Shader_Asset;
     cube_mesh: Mesh_Asset;
     sphere_mesh: Mesh_Asset;
     palette: Texture_Asset;
@@ -367,6 +368,7 @@ store_init :: (store: *Store, platform: *Platform) {
     store.pool_allocator_proc = platform.system.persistent_pool_allocator_proc;
     store.geometry_shader.asset.path = "shaders/triangle.wgsl";
     store.gui_shader.asset.path = "shaders/gui.wgsl";
+    store.post_shader.asset.path = "shaders/post.wgsl";
     store.cube_mesh.asset.path = "meshes/cube.obj";
     store.empty_tile.asset.path = "meshes/empty_tile.obj";
     store.methane.asset.path = "meshes/methane.obj";
@@ -447,6 +449,9 @@ store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
             }
             if store_paths_equal(path_string, store.gui_shader.asset.path) {
                 store_set_blob_asset(*store.gui_shader.asset, data);
+            }
+            if store_paths_equal(path_string, store.post_shader.asset.path) {
+                store_set_blob_asset(*store.post_shader.asset, data);
             }
             if store_paths_equal(path_string, store.empty_tile.asset.path) {
                 store_set_blob_asset(*store.empty_tile.asset, data);

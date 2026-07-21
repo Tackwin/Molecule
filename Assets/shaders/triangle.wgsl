@@ -60,3 +60,9 @@ fn fs(input: Vertex_Output) -> @location(0) vec4f {
     let color = select(input.color, input.color * palette_color, (input.flags & 0x00000001u) != 0u);
     return vec4f(color * lighting, 1.0);
 }
+
+@fragment
+fn fs_gbuffer(input: Vertex_Output) -> @location(0) vec4f {
+    let reserved_palette_sample = textureSampleLevel(palette_texture, palette_sampler, input.uv, 0.0);
+    return vec4f(input.normal + reserved_palette_sample.rgb * 0.0, 1.0);
+}
