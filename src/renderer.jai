@@ -9,6 +9,7 @@ MAX_RENDER_INSTANCES :: 1024;
 MAX_RENDER_GEOMETRY_VERTICES :: 4096;
 MAX_RENDER_DRAW_BATCHES :: 16;
 MAX_GUI_RENDER_INSTANCES :: GUI_MAX_QUADS;
+RENDER_SAMPLE_COUNT :: 4;
 
 Render_Instance :: struct {
     model: M4f;
@@ -60,6 +61,10 @@ Renderer :: struct {
     depth_view: WGPUTextureView;
     depth_width: u32;
     depth_height: u32;
+    msaa_texture: WGPUTexture;
+    msaa_view: WGPUTextureView;
+    msaa_width: u32;
+    msaa_height: u32;
     bind_group: WGPUBindGroup;
     gui_pipeline: WGPURenderPipeline;
     gui_uniform_buffer: WGPUBuffer;
@@ -76,6 +81,8 @@ Renderer :: struct {
     gui_instances: [..] Gui_Render_Instance;
     capture_texture: WGPUTexture;
     capture_view: WGPUTextureView;
+    capture_resolve_texture: WGPUTexture;
+    capture_resolve_view: WGPUTextureView;
     capture_readback_buffer: WGPUBuffer;
     capture_rgba: [..] u8;
     capture_padded_bytes_per_row: u32;
@@ -204,15 +211,26 @@ renderer_resize_capture_attachment :: (renderer: *Renderer, platform: *Platform,
     if renderer.capture_texture {
         gpu.wgpuTextureRelease(renderer.capture_texture);
     }
+    if renderer.capture_resolve_view {
+        gpu.wgpuTextureViewRelease(renderer.capture_resolve_view);
+    }
+    if renderer.capture_resolve_texture {
+        gpu.wgpuTextureRelease(renderer.capture_resolve_texture);
+    }
     texture_descriptor: WGPUTextureDescriptor = .{};
-    texture_descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    texture_descriptor.usage = WGPUTextureUsage_RenderAttachment;
     texture_descriptor.dimension = ._2D;
     texture_descriptor.size = .{ width, height, 1 };
     texture_descriptor.format = .BGRA8Unorm;
     texture_descriptor.mipLevelCount = 1;
-    texture_descriptor.sampleCount = 1;
+    texture_descriptor.sampleCount = RENDER_SAMPLE_COUNT;
     renderer.capture_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *texture_descriptor);
     renderer.capture_view = gpu.wgpuTextureCreateView(renderer.capture_texture, null);
+    resolve_descriptor: WGPUTextureDescriptor = texture_descriptor;
+    resolve_descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    resolve_descriptor.sampleCount = 1;
+    renderer.capture_resolve_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *resolve_descriptor);
+    renderer.capture_resolve_view = gpu.wgpuTextureCreateView(renderer.capture_resolve_texture, null);
     unpadded_bytes_per_row := width * 4;
     renderer.capture_padded_bytes_per_row = (unpadded_bytes_per_row + 255) & ~cast(u32) 255;
     readback_descriptor: WGPUBufferDescriptor = .{};
@@ -286,6 +304,12 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     if renderer.depth_texture && gpu.wgpuTextureRelease {
         gpu.wgpuTextureRelease(renderer.depth_texture);
     }
+    if renderer.msaa_view && gpu.wgpuTextureViewRelease {
+        gpu.wgpuTextureViewRelease(renderer.msaa_view);
+    }
+    if renderer.msaa_texture && gpu.wgpuTextureRelease {
+        gpu.wgpuTextureRelease(renderer.msaa_texture);
+    }
     if renderer.capture_readback_buffer && gpu.wgpuBufferRelease {
         gpu.wgpuBufferRelease(renderer.capture_readback_buffer);
     }
@@ -294,6 +318,12 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     }
     if renderer.capture_texture && gpu.wgpuTextureRelease {
         gpu.wgpuTextureRelease(renderer.capture_texture);
+    }
+    if renderer.capture_resolve_view && gpu.wgpuTextureViewRelease {
+        gpu.wgpuTextureViewRelease(renderer.capture_resolve_view);
+    }
+    if renderer.capture_resolve_texture && gpu.wgpuTextureRelease {
+        gpu.wgpuTextureRelease(renderer.capture_resolve_texture);
     }
     if renderer.instance_buffer && gpu.wgpuBufferRelease {
         gpu.wgpuBufferRelease(renderer.instance_buffer);
@@ -352,11 +382,33 @@ renderer_resize_depth_attachment :: (renderer: *Renderer, platform: *Platform, w
     depth_descriptor.size = .{ width, height, 1 };
     depth_descriptor.format = .Depth24Plus;
     depth_descriptor.mipLevelCount = 1;
-    depth_descriptor.sampleCount = 1;
+    depth_descriptor.sampleCount = RENDER_SAMPLE_COUNT;
     renderer.depth_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *depth_descriptor);
     renderer.depth_view = gpu.wgpuTextureCreateView(renderer.depth_texture, null);
     renderer.depth_width = width;
     renderer.depth_height = height;
+}
+
+renderer_resize_msaa_attachment :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32) {
+    if width == 0 || height == 0 return;
+    gpu := *platform.gpu;
+    if renderer.msaa_view && gpu.wgpuTextureViewRelease {
+        gpu.wgpuTextureViewRelease(renderer.msaa_view);
+    }
+    if renderer.msaa_texture && gpu.wgpuTextureRelease {
+        gpu.wgpuTextureRelease(renderer.msaa_texture);
+    }
+    descriptor: WGPUTextureDescriptor = .{};
+    descriptor.usage = WGPUTextureUsage_RenderAttachment;
+    descriptor.dimension = ._2D;
+    descriptor.size = .{ width, height, 1 };
+    descriptor.format = .BGRA8Unorm;
+    descriptor.mipLevelCount = 1;
+    descriptor.sampleCount = RENDER_SAMPLE_COUNT;
+    renderer.msaa_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *descriptor);
+    renderer.msaa_view = gpu.wgpuTextureCreateView(renderer.msaa_texture, null);
+    renderer.msaa_width = width;
+    renderer.msaa_height = height;
 }
 
 renderer_create_geometry_pipeline :: (
@@ -403,7 +455,7 @@ renderer_create_geometry_pipeline :: (
     depth_stencil.depthWriteEnabled = .True;
     depth_stencil.depthCompare = .Less;
     descriptor.depthStencil = *depth_stencil;
-    descriptor.multisample.count = 1;
+    descriptor.multisample.count = RENDER_SAMPLE_COUNT;
     descriptor.multisample.mask = 0xffffffff;
     descriptor.fragment = *fragment;
     pipeline_scope := renderer_push_validation_scope(renderer, platform);
@@ -467,7 +519,7 @@ renderer_create_gui_pipeline :: (
     descriptor.vertex.module = shader_module;
     descriptor.vertex.entryPoint = to_wgpu_string("vs");
     descriptor.primitive.topology = .TriangleList;
-    descriptor.multisample.count = 1;
+    descriptor.multisample.count = RENDER_SAMPLE_COUNT;
     descriptor.multisample.mask = 0xffffffff;
     descriptor.fragment = *fragment;
     pipeline_scope := renderer_push_validation_scope(renderer, platform);
@@ -624,6 +676,7 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     gui_instance_descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     renderer.gui_instance_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *gui_instance_descriptor);
     renderer_resize_depth_attachment(renderer, platform, width, height);
+    renderer_resize_msaa_attachment(renderer, platform, width, height);
 
     renderer.bind_group = renderer_create_geometry_bind_group(renderer, platform, renderer.pipeline);
     if !renderer.bind_group return;
@@ -847,6 +900,9 @@ renderer_draw :: (
     if renderer.depth_width != width || renderer.depth_height != height {
         renderer_resize_depth_attachment(renderer, platform, width, height);
     }
+    if renderer.msaa_width != width || renderer.msaa_height != height {
+        renderer_resize_msaa_attachment(renderer, platform, width, height);
+    }
     if renderer.capture_supported && (renderer.capture_width != width || renderer.capture_height != height) {
         renderer_resize_capture_attachment(renderer, platform, width, height);
     }
@@ -862,16 +918,22 @@ renderer_draw :: (
         gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.gui_instance_buffer, 0, renderer.gui_instances.data, cast(u64) renderer.gui_instances.count * size_of(Gui_Render_Instance));
     }
     surface_texture: WGPUSurfaceTexture = .{};
-    view: WGPUTextureView;
+    surface_view: WGPUTextureView;
+    render_view: WGPUTextureView;
     if capture_frame && renderer.capture_supported {
-        view = renderer.capture_view;
+        render_view = renderer.capture_view;
     } else {
         gpu.wgpuSurfaceGetCurrentTexture(renderer.surface, *surface_texture);
         if surface_texture.status != .SuccessOptimal && surface_texture.status != .SuccessSuboptimal return;
-        view = gpu.wgpuTextureCreateView(surface_texture.texture, null);
+        surface_view = gpu.wgpuTextureCreateView(surface_texture.texture, null);
+        render_view = renderer.msaa_view;
     }
     attachment: WGPURenderPassColorAttachment = .{};
-    attachment.view = view;
+    attachment.view = render_view;
+    attachment.resolveTarget = null;
+    if capture_frame && renderer.capture_supported {
+        attachment.resolveTarget = renderer.capture_resolve_view;
+    }
     attachment.loadOp = .Clear;
     attachment.storeOp = .Store;
     attachment.clearValue = .{ 0.035, 0.045, 0.075, 1.0 };
@@ -886,6 +948,9 @@ renderer_draw :: (
         depth_attachment.depthStoreOp = .Store;
         depth_attachment.depthClearValue = 1.0;
         pass_descriptor.depthStencilAttachment = *depth_attachment;
+        if renderer.gui_instances.count == 0 && surface_view {
+            attachment.resolveTarget = surface_view;
+        }
         pass := gpu.wgpuCommandEncoderBeginRenderPass(encoder, *pass_descriptor);
         gpu.wgpuRenderPassEncoderSetPipeline(pass, renderer.pipeline);
         gpu.wgpuRenderPassEncoderSetBindGroup(pass, 0, renderer.bind_group, 0, null);
@@ -896,6 +961,11 @@ renderer_draw :: (
     }
     if renderer.gui_instances.count > 0 && renderer.gui_bind_group {
         attachment.loadOp = ifx renderer.instances.count > 0 then .Load else .Clear;
+        if surface_view {
+            attachment.resolveTarget = surface_view;
+        } else if capture_frame && renderer.capture_supported {
+            attachment.resolveTarget = renderer.capture_resolve_view;
+        }
         pass_descriptor.depthStencilAttachment = null;
         gui_pass := gpu.wgpuCommandEncoderBeginRenderPass(encoder, *pass_descriptor);
         gpu.wgpuRenderPassEncoderSetPipeline(gui_pass, renderer.gui_pipeline);
@@ -905,7 +975,7 @@ renderer_draw :: (
     }
     if capture_frame && renderer.capture_supported {
         source: WGPUTexelCopyTextureInfo = .{};
-        source.texture = renderer.capture_texture;
+        source.texture = renderer.capture_resolve_texture;
         source.aspect = .All;
         destination: WGPUTexelCopyBufferInfo = .{};
         destination.buffer = renderer.capture_readback_buffer;
@@ -920,6 +990,8 @@ renderer_draw :: (
         renderer_finish_capture(renderer, platform);
     } else {
         gpu.wgpuSurfacePresent(renderer.surface);
-        gpu.wgpuTextureViewRelease(view);
+        if surface_view {
+            gpu.wgpuTextureViewRelease(surface_view);
+        }
     }
 }

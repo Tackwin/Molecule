@@ -1637,7 +1637,7 @@ jai_imports.jsDeviceCreateRenderPipeline = (params_ptr, returns_ptr) => {
 const getRenderPassColorAttachment = (ptr) => {
 	const view_idx = getU64(ptr, 8);
 	const depthSlice = getU32(ptr, 16) == 0 ? undefined : getU32(ptr, 16);
-	const resolveTarget_idx = getU64(ptr, 20);
+	const resolveTarget_idx = getU64(ptr, 24);
 	const loadOp = getU32(ptr, 32);
 	const storeOp = getU32(ptr, 36);
 	const clearValueR = getF64(ptr, 40);

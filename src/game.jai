@@ -121,7 +121,7 @@ camera_move :: (camera: *Camera, input: *Frame_Input) {
     camera.target += movement;
 }
 
-camera_zoom :: (camera: *Camera, wheel_steps: s32) {
+camera_zoom :: (camera: *Camera, wheel_steps: s32, platform: *Platform) {
     if wheel_steps == 0 {
         return;
     }
@@ -140,7 +140,7 @@ camera_zoom :: (camera: *Camera, wheel_steps: s32) {
     camera.position = camera.target + normalize(to_camera) * distance;
 }
 
-camera_pan :: (state: *Game_State, input: *Frame_Input) {
+camera_pan :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
     if (input.mouse.buttons_released & MOUSE_BUTTON_RIGHT) != 0 {
         state.camera_pan_active = false;
     }
@@ -198,11 +198,6 @@ Game_State :: struct {
     capture_qoi: [..] u8;
 }
 
-game_log :: (platform: *Platform, text: string) {
-    if !platform.system.log return;
-    platform.system.log(.{ data = text.data, count = text.count });
-}
-
 game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
     state.* = .{};
     state.deterministic_seed = seed;
@@ -212,19 +207,19 @@ game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, h
         state.water_molecules[it].lane = cast(s32) (it % GRID_ROWS);
         state.water_molecules[it].start_offset = cast(float32) (it / GRID_ROWS) * 9.0;
     }
-    game_log(platform, "Store initialization started");
+    log(platform, "Store initialization started");
     store_init(*state.store, platform);
-    game_log(platform, "Store struct initialized");
+    log(platform, "Store struct initialized");
     store_load_platform_blob(*state.store, platform);
-    game_log(platform, "Store blob loaded");
+    log(platform, "Store blob loaded");
     store_start_shader_watch(*state.store, platform);
-    game_log(platform, "Store initialization finished");
+    log(platform, "Store initialization finished");
     gui_init(*state.gui);
-    game_log(platform, "Renderer initialization started");
+    log(platform, "Renderer initialization started");
     renderer_init(*state.renderer, platform, width, height, *state.store);
-    game_log(platform, "Renderer initialization finished");
+    log(platform, "Renderer initialization finished");
     store_upload_gpu_assets(*state.store, *state.renderer, platform);
-    game_log(platform, "GPU asset upload finished");
+    log(platform, "GPU asset upload finished");
 }
 
 game_reload :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, height: u32) {
@@ -262,8 +257,8 @@ game_tick :: (state: *Game_State, input: *Frame_Input, platform: *Platform) {
     }
     camera_move(*state.camera, input);
     if !state.gui.mouse_captured {
-        camera_zoom(*state.camera, input.mouse.wheel_steps);
-        camera_pan(state, input);
+        camera_zoom(*state.camera, input.mouse.wheel_steps, platform);
+        camera_pan(state, input, platform);
     }
     renderer_render_game(state, input, platform);
     if input.capture_frame {

@@ -171,6 +171,10 @@ Platform_System_Api :: struct {
     read_file_async: #type (path: [] u8, request_id: u32) = null;
     send_websocket: #type (data: [] u8, destination: u32) = null;
 }
+log :: (platform: *Platform, text: string) {
+    if !platform.system.log return;
+    platform.system.log(.{ data = text.data, count = text.count });
+}
 
 Platform :: struct {
     system: Platform_System_Api;

@@ -52,6 +52,9 @@ Wasm_Frame_Input_Bridge_Descriptor :: struct {
     movement_key_count: u64;
 }
 
+ptrdiff :: (base: *void, member: *void) -> u64 {
+    return cast(u64) (cast(u64) member - cast(u64) base);
+}
 member_offset :: ($T: Type, member_name: string) -> u64 {
     info := type_info(T);
     for info.members {
@@ -67,18 +70,18 @@ wasm_install_frame_input_bridge :: () {
     descriptor: Wasm_Frame_Input_Bridge_Descriptor = .{};
     descriptor.input = *wasm_input;
     descriptor.input_bytes = size_of(Frame_Input);
-    descriptor.simulation_delta_seconds_offset = member_offset(Frame_Input, "simulation_delta_seconds");
-    descriptor.window_size_pixels_offset = member_offset(Frame_Input, "window_size_pixels");
-    descriptor.framebuffer_size_pixels_offset = member_offset(Frame_Input, "framebuffer_size_pixels");
-    descriptor.keyboard_down_offset = member_offset(Frame_Input, "keyboard") + member_offset(Keyboard_State, "down");
-    descriptor.keyboard_pressed_offset = member_offset(Frame_Input, "keyboard") + member_offset(Keyboard_State, "pressed");
-    descriptor.keyboard_released_offset = member_offset(Frame_Input, "keyboard") + member_offset(Keyboard_State, "released");
-    descriptor.mouse_position_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "position_pixels");
-    descriptor.mouse_delta_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "delta_pixels");
-    descriptor.mouse_wheel_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "wheel_steps");
-    descriptor.mouse_buttons_down_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "buttons_down");
-    descriptor.mouse_buttons_pressed_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "buttons_pressed");
-    descriptor.mouse_buttons_released_offset = member_offset(Frame_Input, "mouse") + member_offset(Mouse_State, "buttons_released");
+    descriptor.simulation_delta_seconds_offset = ptrdiff(*wasm_input, *wasm_input.simulation_delta_seconds);
+    descriptor.window_size_pixels_offset = ptrdiff(*wasm_input, *wasm_input.window_size_pixels);
+    descriptor.framebuffer_size_pixels_offset = ptrdiff(*wasm_input, *wasm_input.framebuffer_size_pixels);
+    descriptor.keyboard_down_offset = ptrdiff(*wasm_input, *wasm_input.keyboard.down);
+    descriptor.keyboard_pressed_offset = ptrdiff(*wasm_input, *wasm_input.keyboard.pressed);
+    descriptor.keyboard_released_offset = ptrdiff(*wasm_input, *wasm_input.keyboard.released);
+    descriptor.mouse_position_offset = ptrdiff(*wasm_input, *wasm_input.mouse.position_pixels);
+    descriptor.mouse_delta_offset = ptrdiff(*wasm_input, *wasm_input.mouse.delta_pixels);
+    descriptor.mouse_wheel_offset = ptrdiff(*wasm_input, *wasm_input.mouse.wheel_steps);
+    descriptor.mouse_buttons_down_offset = ptrdiff(*wasm_input, *wasm_input.mouse.buttons_down);
+    descriptor.mouse_buttons_pressed_offset = ptrdiff(*wasm_input, *wasm_input.mouse.buttons_pressed);
+    descriptor.mouse_buttons_released_offset = ptrdiff(*wasm_input, *wasm_input.mouse.buttons_released);
     descriptor.movement_key_count = KEY_TOGGLE_GUI_DEMO + 1;
     jsInstallFrameInputBuffer(*descriptor, null);
 }

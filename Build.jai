@@ -1,5 +1,6 @@
 #import "Compiler";
 #import "Basic";
+#import "Process";
 #import "File_Utilities";
 #import "File";
 #import "String";
@@ -186,22 +187,42 @@ build_wasm :: () {
     copy_file("build/assets.blob", "web/assets.blob");
 }
 
+publish :: () {
+    run_command(
+        "sftpc",
+        "-profile=tools/ssh.tlp",
+        "put",
+        "-o",
+        "./web/*",
+        "www/tackwin/molecule"
+    );
+}
+
 build :: () {
     set_build_options_dc(.{ do_output = false });
     args := get_build_options().compile_time_command_line;
+    wants_all := false;
     wants_win32 := false;
     wants_win32_game := false;
     wants_win32_launcher := false;
     wants_wasm := false;
+    wants_publish := false;
     for args {
         wants_win32 |= compare(it, "win32") == 0;
         wants_win32_game |= compare(it, "win32-game") == 0;
         wants_win32_launcher |= compare(it, "win32-launcher") == 0;
         wants_wasm |= compare(it, "wasm") == 0;
+        wants_all |= compare(it, "all") == 0;
+        wants_publish |= compare(it, "publish") == 0;
     }
-    if !wants_win32 && !wants_win32_game && !wants_win32_launcher && !wants_wasm {
+    if !wants_win32 && !wants_win32_game && !wants_win32_launcher && !wants_wasm && !wants_all && !wants_publish {
         wants_win32 = true;
     }
+    wants_win32 |= wants_all;
+    wants_win32_game |= wants_all;
+    wants_win32_launcher |= wants_all;
+    wants_wasm |= wants_all;
+    wants_publish |= wants_all;
     if wants_win32 {
         build_win32();
     } else if wants_win32_game || wants_win32_launcher {
@@ -210,6 +231,9 @@ build :: () {
         if wants_win32_launcher build_win32_launcher();
     }
     if wants_wasm build_wasm();
+    if wants_publish {
+        publish();
+    }
 }
 
 #run build();

@@ -101,6 +101,9 @@ async function boot() {
     mouseWheelSteps += -Math.sign(event.deltaY);
   }, { passive: false });
   canvas.addEventListener("mousedown", event => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = Math.floor((event.clientX - rect.left) * canvas.width / rect.width);
+    mouseY = Math.floor((event.clientY - rect.top) * canvas.height / rect.height);
     if (event.button === 0) {
       mouseButtonsDown |= 1;
       mouseButtonsPressed |= 1;
@@ -112,14 +115,14 @@ async function boot() {
       mouseButtonsPressed |= 2;
     }
   });
-  canvas.addEventListener("mouseup", event => {
+  // Use window so button-up is captured even when the pointer leaves the canvas.
+  window.addEventListener("mouseup", event => {
     if (event.button === 0) {
       mouseButtonsDown &= ~1;
       mouseButtonsReleased |= 1;
       return;
     }
     if (event.button === 2) {
-      event.preventDefault();
       mouseButtonsDown &= ~2;
       mouseButtonsReleased |= 2;
     }
