@@ -24,6 +24,8 @@ Mesh_Vertex :: struct {
     position_padding: float32;
     normal: V3f;
     normal_padding: float32;
+    uv: V2f;
+    uv_padding: V2f;
 }
 
 Mesh_Asset :: struct {
@@ -73,6 +75,7 @@ Store :: struct {
     gui_shader: Shader_Asset;
     cube_mesh: Mesh_Asset;
     sphere_mesh: Mesh_Asset;
+    palette: Texture_Asset;
     verdana_font: Font_Asset;
 
     empty_tile: Mesh_Asset;
@@ -225,6 +228,7 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
                 v: Mesh_Vertex;
                 v.position = positions[v_indices[it] - 1];
                 v.normal = normals[n_indices[it] - 1];
+                v.uv = uvs[t_indices[it] - 1];
                 array_add(*mesh.vertices, v);
             }
             continue;
@@ -242,6 +246,28 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
                 v: Mesh_Vertex;
                 v.position = positions[v_indices[it] - 1];
                 v.normal = normals[n_indices[it] - 1];
+                array_add(*mesh.vertices, v);
+            }
+            continue;
+        }
+        if scan2(line, "f %/% %/% %/%", *v_indices[0], *t_indices[0], *v_indices[1], *t_indices[1], *v_indices[2],
+            *t_indices[2]) {
+            ok := true;
+            for 0..2
+                ok &= 0 < v_indices[it] && v_indices[it] <= positions.count
+                    && 0 < t_indices[it] && t_indices[it] <= uvs.count;
+            if !ok
+                continue;
+
+            face_normal := normalize(cross(
+                positions[v_indices[1] - 1] - positions[v_indices[0] - 1],
+                positions[v_indices[2] - 1] - positions[v_indices[0] - 1]
+            ));
+            for 0..2 {
+                v: Mesh_Vertex;
+                v.position = positions[v_indices[it] - 1];
+                v.normal = face_normal;
+                v.uv = uvs[t_indices[it] - 1];
                 array_add(*mesh.vertices, v);
             }
             continue;
@@ -345,6 +371,7 @@ store_init :: (store: *Store, platform: *Platform) {
     store.empty_tile.asset.path = "meshes/empty_tile.obj";
     store.methane.asset.path = "meshes/methane.obj";
     store.sphere_mesh.asset.path = "meshes/sphere.obj";
+    store.palette.asset.path = "textures/palette.qoi";
     store.verdana_font.metrics_asset.path = "fonts/verdana.csv";
     store.verdana_font.atlas.asset.path = "fonts/verdana.qoi";
     if platform.system.log {
@@ -403,6 +430,7 @@ store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
         cursor += 4;
         metrics_loaded := false;
         atlas_loaded := false;
+        palette_loaded := false;
         for 0..path_count - 1 {
             if cursor + 8 > xx blob.count return;
             path_count_bytes := store_read_u32_le(blob, cursor);
@@ -452,6 +480,10 @@ store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
                 store_set_blob_asset(*store.verdana_font.atlas.asset, data);
                 atlas_loaded = true;
             }
+            if store_paths_equal(path_string, store.palette.asset.path) {
+                store_set_blob_asset(*store.palette.asset, data);
+                palette_loaded = true;
+            }
         }
         if atlas_loaded {
             log(platform, "Store promoting font atlas");
@@ -460,6 +492,10 @@ store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
         if metrics_loaded || atlas_loaded {
             log(platform, "Store promoting font metrics");
             store_promote_font_metrics(*store.verdana_font, store);
+        }
+        if palette_loaded {
+            log(platform, "Store promoting palette texture");
+            store_promote_qoi_texture(*store.palette, store, platform);
         }
     }
 }

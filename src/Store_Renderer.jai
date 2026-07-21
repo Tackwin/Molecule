@@ -14,5 +14,11 @@ store_upload_gpu_assets :: (store: *Store, renderer: *Renderer, platform: *Platf
     if !renderer_upload_texture_asset(renderer, platform, *store.verdana_font.atlas) {
         return false;
     }
+    if !renderer_upload_texture_asset(renderer, platform, *store.palette) {
+        return false;
+    }
+    if !renderer_rebuild_asset_bind_groups(renderer, platform, *store.verdana_font.atlas, *store.palette) {
+        return false;
+    }
     return true;
 }

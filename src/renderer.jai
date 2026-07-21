@@ -10,12 +10,13 @@ MAX_RENDER_GEOMETRY_VERTICES :: 4096;
 MAX_RENDER_DRAW_BATCHES :: 16;
 MAX_GUI_RENDER_INSTANCES :: GUI_MAX_QUADS;
 RENDER_SAMPLE_COUNT :: 4;
+RENDER_INSTANCE_FLAG_PALETTE :: 0x00000001;
 
 Render_Instance :: struct {
     model: M4f;
     color: V4f;
     vertex_offset: u32;
-    padding0: u32;
+    flags: u32;
     padding1: u32;
     padding2: u32;
 }
@@ -543,13 +544,15 @@ renderer_create_gui_pipeline :: (
 renderer_create_geometry_bind_group :: (
     renderer: *Renderer,
     platform: *Platform,
-    pipeline: WGPURenderPipeline
+    pipeline: WGPURenderPipeline,
+    palette: *Texture_Asset
 ) -> WGPUBindGroup {
-    if !pipeline || !renderer.camera_buffer || !renderer.geometry_buffer || !renderer.instance_buffer return null;
+    if !pipeline || !renderer.camera_buffer || !renderer.geometry_buffer || !renderer.instance_buffer ||
+        !palette.gpu_view || !palette.gpu_sampler return null;
     gpu := *platform.gpu;
     geometry_bytes := cast(u64) MAX_RENDER_GEOMETRY_VERTICES * size_of(Mesh_Vertex);
     layout := gpu.wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
-    entries: [3] WGPUBindGroupEntry;
+    entries: [5] WGPUBindGroupEntry;
     for 0..entries.count - 1 {
         entries[it] = .{};
     }
@@ -562,6 +565,10 @@ renderer_create_geometry_bind_group :: (
     entries[2].binding = 2;
     entries[2].buffer = renderer.instance_buffer;
     entries[2].size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
+    entries[3].binding = 3;
+    entries[3].textureView = palette.gpu_view;
+    entries[4].binding = 4;
+    entries[4].sampler = palette.gpu_sampler;
     descriptor: WGPUBindGroupDescriptor = .{};
     descriptor.layout = layout;
     descriptor.entryCount = entries.count;
@@ -605,6 +612,32 @@ renderer_create_gui_bind_group :: (
         gpu.wgpuBindGroupLayoutRelease(layout);
     }
     return bind_group;
+}
+
+renderer_rebuild_asset_bind_groups :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    font_atlas: *Texture_Asset,
+    palette: *Texture_Asset
+) -> bool {
+    geometry_bind_group := renderer_create_geometry_bind_group(renderer, platform, renderer.pipeline, palette);
+    if !geometry_bind_group return false;
+    gui_bind_group := renderer_create_gui_bind_group(renderer, platform, renderer.gui_pipeline, font_atlas);
+    if !gui_bind_group {
+        if platform.gpu.wgpuBindGroupRelease {
+            platform.gpu.wgpuBindGroupRelease(geometry_bind_group);
+        }
+        return false;
+    }
+    if renderer.bind_group && platform.gpu.wgpuBindGroupRelease {
+        platform.gpu.wgpuBindGroupRelease(renderer.bind_group);
+    }
+    if renderer.gui_bind_group && platform.gpu.wgpuBindGroupRelease {
+        platform.gpu.wgpuBindGroupRelease(renderer.gui_bind_group);
+    }
+    renderer.bind_group = geometry_bind_group;
+    renderer.gui_bind_group = gui_bind_group;
+    return true;
 }
 
 renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: u32, store: *Store) {
@@ -678,9 +711,6 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     renderer_resize_depth_attachment(renderer, platform, width, height);
     renderer_resize_msaa_attachment(renderer, platform, width, height);
 
-    renderer.bind_group = renderer_create_geometry_bind_group(renderer, platform, renderer.pipeline);
-    if !renderer.bind_group return;
-
     renderer.capture_supported = gpu.wgpuCommandEncoderCopyTextureToBuffer &&
         gpu.wgpuBufferMapAsync && gpu.wgpuBufferGetConstMappedRange && gpu.wgpuBufferUnmap;
     if renderer.capture_supported {
@@ -722,7 +752,6 @@ renderer_upload_mesh_asset :: (renderer: *Renderer, platform: *Platform, mesh: *
 renderer_upload_texture_asset :: (renderer: *Renderer, platform: *Platform, texture: *Texture_Asset) -> bool {
     if !renderer.ready || texture.pixels.count == 0 return false;
     if texture.gpu_uploaded_asset_version == texture.asset.version return true;
-    if texture.width * 4 % 256 != 0 return false;
     gpu := *platform.gpu;
     descriptor: WGPUTextureDescriptor = .{};
     descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
@@ -746,30 +775,41 @@ renderer_upload_texture_asset :: (renderer: *Renderer, platform: *Platform, text
     destination: WGPUTexelCopyTextureInfo = .{};
     destination.texture = texture.gpu_texture;
     destination.aspect = .All;
+    unpadded_bytes_per_row := texture.width * 4;
+    padded_bytes_per_row := (unpadded_bytes_per_row + 255) & ~cast(u32) 255;
+    pixel_data := cast(*u8) texture.pixels.data;
+    pixel_data_count := cast(u64) texture.pixels.count * size_of(Qoi_Pixel);
+    padded_pixels: [..] u8;
+    if padded_bytes_per_row != unpadded_bytes_per_row {
+        padded_pixels.allocator = temp;
+        array_resize(*padded_pixels, cast(int) padded_bytes_per_row * texture.height);
+        for y: 0..texture.height - 1 {
+            source_row := pixel_data + cast(u64) y * unpadded_bytes_per_row;
+            destination_row := padded_pixels.data + cast(u64) y * padded_bytes_per_row;
+            memcpy(destination_row, source_row, unpadded_bytes_per_row);
+        }
+        pixel_data = padded_pixels.data;
+        pixel_data_count = cast(u64) padded_pixels.count;
+    }
     layout: WGPUTexelCopyBufferLayout = .{};
-    layout.bytesPerRow = texture.width * 4;
+    layout.bytesPerRow = padded_bytes_per_row;
     layout.rowsPerImage = texture.height;
     extent: WGPUExtent3D = .{ texture.width, texture.height, 1 };
-    gpu.wgpuQueueWriteTexture(renderer.queue, *destination, texture.pixels.data, cast(u64) texture.pixels.count * size_of(Qoi_Pixel), *layout, *extent);
-    new_bind_group := renderer_create_gui_bind_group(renderer, platform, renderer.gui_pipeline, texture);
-    if !new_bind_group return false;
-    if renderer.gui_bind_group && gpu.wgpuBindGroupRelease {
-        gpu.wgpuBindGroupRelease(renderer.gui_bind_group);
-    }
-    renderer.gui_bind_group = new_bind_group;
+    gpu.wgpuQueueWriteTexture(renderer.queue, *destination, pixel_data, pixel_data_count, *layout, *extent);
     texture.gpu_uploaded_asset_version = texture.asset.version;
-    return renderer.gui_bind_group != null;
+    return texture.gpu_texture && texture.gpu_view && texture.gpu_sampler;
 }
 
 renderer_reload_geometry_shader :: (
     renderer: *Renderer,
     platform: *Platform,
-    shader: *Shader_Asset
+    shader: *Shader_Asset,
+    palette: *Texture_Asset
 ) -> bool {
     renderer.geometry_shader_attempted_version = shader.asset.version;
     new_pipeline := renderer_create_geometry_pipeline(renderer, platform, shader);
     if !new_pipeline return false;
-    new_bind_group := renderer_create_geometry_bind_group(renderer, platform, new_pipeline);
+    new_bind_group := renderer_create_geometry_bind_group(renderer, platform, new_pipeline, palette);
     if !new_bind_group {
         if platform.gpu.wgpuRenderPipelineRelease {
             platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
@@ -832,7 +872,7 @@ renderer_reload_changed_shaders :: (renderer: *Renderer, platform: *Platform, st
     if !renderer.ready return;
     geometry_version := store.geometry_shader.asset.version;
     if geometry_version != renderer.geometry_shader_attempted_version {
-        renderer_reload_geometry_shader(renderer, platform, *store.geometry_shader);
+        renderer_reload_geometry_shader(renderer, platform, *store.geometry_shader, *store.palette);
     }
     gui_version := store.gui_shader.asset.version;
     if gui_version != renderer.gui_shader_attempted_version {
@@ -840,7 +880,7 @@ renderer_reload_changed_shaders :: (renderer: *Renderer, platform: *Platform, st
     }
 }
 
-renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color: V4f) {
+renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color: V4f, flags: u32) {
     if renderer.instances.count >= MAX_RENDER_INSTANCES return;
     if mesh.gpu_vertex_count == 0 return;
     if renderer.draw_batches.count == 0 ||
@@ -852,7 +892,12 @@ renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color:
             first_instance = xx renderer.instances.count,
         });
     }
-    array_add(*renderer.instances, .{ model = model, color = color, vertex_offset = mesh.gpu_vertex_offset });
+    array_add(*renderer.instances, .{
+        model = model,
+        color = color,
+        vertex_offset = mesh.gpu_vertex_offset,
+        flags = flags,
+    });
     renderer.draw_batches[renderer.draw_batches.count - 1].instance_count += 1;
 }
 
@@ -896,7 +941,7 @@ renderer_draw :: (
     height: u32,
     capture_frame: bool
 ) {
-    if !renderer.ready return;
+    if !renderer.ready || !renderer.bind_group return;
     if renderer.depth_width != width || renderer.depth_height != height {
         renderer_resize_depth_attachment(renderer, platform, width, height);
     }

@@ -1,7 +1,6 @@
 renderer_push_water_molecule :: (renderer: *Renderer, methane: Mesh_Asset, center: V3f) {
     oxygen_model := m4_translation(center) * m4_scale(.{ 0.65, 0.65, 0.65 });
-    // renderer_push_mesh(renderer, methane, oxygen_model, .{ 0.85, 0.08, 0.05, 1.0 });
-    renderer_push_mesh(renderer, methane, oxygen_model, .{ 0.85, 0.08, 0.05, 1.0 });
+    renderer_push_mesh(renderer, methane, oxygen_model, .{ 1.0, 1.0, 1.0, 1.0 }, RENDER_INSTANCE_FLAG_PALETTE);
 
     // oxygen_hydrogen_distance :: 1.15;
     // hydrogen_x := oxygen_hydrogen_distance * 0.612217;
@@ -9,8 +8,6 @@ renderer_push_water_molecule :: (renderer: *Renderer, methane: Mesh_Asset, cente
     // hydrogen_scale := m4_scale(.{ 0.36, 0.36, 0.36 });
     // hydrogen_a := center + .{ hydrogen_x, hydrogen_y, 0 };
     // hydrogen_b := center + .{ hydrogen_x, -hydrogen_y, 0 };
-    // renderer_push_mesh(renderer, sphere, m4_translation(hydrogen_a) * hydrogen_scale, .{ 0.92, 0.94, 1.0, 1.0 });
-    // renderer_push_mesh(renderer, sphere, m4_translation(hydrogen_b) * hydrogen_scale, .{ 0.92, 0.94, 1.0, 1.0 });
 }
 
 renderer_render_gui_demo :: (state: *Game_State, input: *Frame_Input) {
@@ -76,7 +73,7 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
         for column: 0..GRID_COLUMNS - 1 {
             position := game_grid_position(cast(s32) column, cast(s32) row);
             model := m4_translation(position) * m4_scale(.{ 0.92, 0.92, 0.35 });
-            renderer_push_mesh(renderer, state.store.cube_mesh, model, .{ 0.12, 0.32, 0.45, 1.0 });
+            renderer_push_mesh(renderer, state.store.cube_mesh, model, .{ 0.12, 0.32, 0.45, 1.0 }, 0);
         }
     }
 
