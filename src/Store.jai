@@ -68,11 +68,15 @@ Store :: struct {
     pool: Pool;
     pool_allocator_proc: Allocator_Proc;
     shader_watch: File_Watch_Handle;
+
     geometry_shader: Shader_Asset;
     gui_shader: Shader_Asset;
     cube_mesh: Mesh_Asset;
     sphere_mesh: Mesh_Asset;
     verdana_font: Font_Asset;
+
+    empty_tile: Mesh_Asset;
+    methane: Mesh_Asset;
 }
 
 Allocator_Proc_Bits :: union {
@@ -126,12 +130,23 @@ store_promote_qoi_texture :: (texture: *Texture_Asset, store: *Store, platform: 
 }
 
 store_promote_font_metrics :: (font: *Font_Asset, store: *Store) {
+    next_line :: (remaining: *string) -> string {
+        found, line, tail := split_from_left(remaining.*, #char "\n");
+        if found {
+            remaining.* = tail;
+            return line;
+        }
+        line = remaining.*;
+        remaining.* = "";
+        return line;
+    }
+
     if font.metrics_asset.bytes.count == 0 return;
     if font.atlas.width == 0 || font.atlas.height == 0 return;
     if font.glyphs[65].advance != 0 return;
     text: string = .{ data = font.metrics_asset.bytes.data, count = font.metrics_asset.bytes.count };
     while text.count > 0 {
-        line := store_next_line(*text);
+        line := next_line(*text);
         line = trim(line, " \t\r\n");
         if line.count == 0 continue;
         unicode: s32;
@@ -155,66 +170,145 @@ store_promote_font_metrics :: (font: *Font_Asset, store: *Store) {
     }
 }
 
-store_next_line :: (text: *string) -> string {
-    result := text.*;
-    while text.count > 0 && text.data[0] != #char "\n" {
-        text.data += 1;
-        text.count -= 1;
-    }
-    result.count -= text.count;
-    if text.count > 0 {
-        text.data += 1;
-        text.count -= 1;
-    }
-    return result;
-}
-
 store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
+    Obj_Face_Corner :: struct {
+        position_index: s64;
+        normal_index: s64;
+        has_normal: bool;
+    }
+
+    next_line :: (remaining: *string) -> string {
+        found, line, tail := split_from_left(remaining.*, #char "\n");
+        if found {
+            remaining.* = tail;
+            return line;
+        }
+        line = remaining.*;
+        remaining.* = "";
+        return line;
+    }
+
+    next_token :: (remaining: *string) -> string {
+        token, found := parse_token(remaining, "", " \t\r\n");
+        if !found return "";
+        return token;
+    }
+
+    parse_index :: (text: string) -> s64, bool {
+        value, parsed, tail := string_to_int(text);
+        return value, parsed && tail.count == 0;
+    }
+
+    parse_face_corner :: (text: string) -> Obj_Face_Corner, bool {
+        has_first_slash, position_text, after_position := split_from_left(text, #char "/");
+        position_index, position_parsed := parse_index(position_text);
+        if !position_parsed return .{}, false;
+        if !has_first_slash return .{ position_index = position_index }, true;
+
+        has_second_slash, ignored_texture_text, normal_text := split_from_left(after_position, #char "/");
+        if !has_second_slash return .{ position_index = position_index }, true;
+        normal_index, normal_parsed := parse_index(normal_text);
+        if !normal_parsed return .{}, false;
+        return .{
+            position_index = position_index,
+            normal_index = normal_index,
+            has_normal = true,
+        }, true;
+    }
+
+    resolve_index :: (obj_index: s64, count: int) -> int, bool {
+        index := obj_index;
+        if index > 0 {
+            index -= 1;
+        } else if index < 0 {
+            index = count + index;
+        } else {
+            return 0, false;
+        }
+        if index < 0 || index >= count return 0, false;
+        return cast(int) index, true;
+    }
+
+    fail :: (asset: *Mesh_Asset) {
+        asset.asset.state = .FAILED;
+    }
+
     if mesh.asset.bytes.count == 0 || mesh.vertices.count > 0 return;
-    mesh.vertices.allocator = .{ store.pool_allocator_proc, *store.pool };
+    allocator: Allocator = .{ store.pool_allocator_proc, *store.pool };
+    mesh.vertices.allocator = allocator;
+    positions: [..] V3f;
+    positions.allocator = allocator;
+    normals: [..] V3f;
+    normals.allocator = allocator;
     text: string = .{ data = mesh.asset.bytes.data, count = mesh.asset.bytes.count };
-    positions: [256] V3f;
-    position_count: s32 = 0;
     while text.count > 0 {
-        line := store_next_line(*text);
-        if line.count < 2 continue;
-        if line.data[0] == #char "v" && line.data[1] == #char " " {
+        line := trim(next_line(*text), " \t\r");
+        if line.count == 0 || line.data[0] == #char "#" continue;
+        remaining := line;
+        keyword := next_token(*remaining);
+        if keyword == "v" {
             position: V3f;
             if !scan2(line, "v % % %", *position.x, *position.y, *position.z) {
-                mesh.asset.state = .FAILED;
+                fail(mesh);
                 return;
             }
-            if position_count >= positions.count {
-                mesh.asset.state = .FAILED;
-                return;
-            }
-            positions[position_count] = position;
-            position_count += 1;
+            array_add(*positions, position);
             continue;
         }
-        if line.data[0] != #char "f" || line.data[1] != #char " " continue;
-        indices: [3] s32;
-        if !scan2(line, "f % % %", *indices[0], *indices[1], *indices[2]) {
-            mesh.asset.state = .FAILED;
-            return;
-        }
-        for 0..2 {
-            indices[it] -= 1;
-            if indices[it] < 0 || indices[it] >= position_count {
-                mesh.asset.state = .FAILED;
+        if keyword == "vn" {
+            normal: V3f;
+            if !scan2(line, "vn % % %", *normal.x, *normal.y, *normal.z) {
+                fail(mesh);
                 return;
             }
+            array_add(*normals, normal);
+            continue;
         }
-        a := positions[indices[0]];
-        b := positions[indices[1]];
-        c := positions[indices[2]];
-        normal := normalize(cross(b - a, c - a));
-        array_add(*mesh.vertices, .{ position = a, normal = normal });
-        array_add(*mesh.vertices, .{ position = b, normal = normal });
-        array_add(*mesh.vertices, .{ position = c, normal = normal });
+        if keyword != "f" continue;
+
+        corners: [3] Obj_Face_Corner;
+        for 0..2 {
+            corner, parsed := parse_face_corner(next_token(*remaining));
+            if !parsed {
+                fail(mesh);
+                return;
+            }
+            corners[it] = corner;
+        }
+        if next_token(*remaining).count != 0 {
+            fail(mesh);
+            return;
+        }
+
+        position_indices: [3] int;
+        for 0..2 {
+            position_index, resolved := resolve_index(corners[it].position_index, positions.count);
+            if !resolved {
+                fail(mesh);
+                return;
+            }
+            position_indices[it] = position_index;
+        }
+
+        a := positions[position_indices[0]];
+        b := positions[position_indices[1]];
+        c := positions[position_indices[2]];
+        face_normal := normalize(cross(b - a, c - a));
+        for 0..2 {
+            normal := face_normal;
+            if corners[it].has_normal {
+                normal_index, resolved := resolve_index(corners[it].normal_index, normals.count);
+                if !resolved {
+                    fail(mesh);
+                    return;
+                }
+                normal = normals[normal_index];
+            }
+            array_add(*mesh.vertices, .{ position = positions[position_indices[it]], normal = normal });
+        }
     }
     if mesh.vertices.count == 0 {
-        mesh.asset.state = .FAILED;
+        fail(mesh);
     }
 }
 
@@ -289,6 +383,8 @@ store_init :: (store: *Store, platform: *Platform) {
     store.geometry_shader.asset.path = "shaders/triangle.wgsl";
     store.gui_shader.asset.path = "shaders/gui.wgsl";
     store.cube_mesh.asset.path = "meshes/cube.obj";
+    store.empty_tile.asset.path = "meshes/empty_tile.obj";
+    store.methane.asset.path = "meshes/methane.obj";
     store.sphere_mesh.asset.path = "meshes/sphere.obj";
     store.verdana_font.metrics_asset.path = "fonts/verdana.csv";
     store.verdana_font.atlas.asset.path = "fonts/verdana.qoi";
@@ -359,44 +455,35 @@ store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
             data: [] u8 = .{ data = blob.data + cursor, count = xx data_count };
             cursor += data_count;
             path_string: string = .{ data = path.data, count = path.count };
-            if platform.system.log {
-                message := tprint(
-                    "Store loading asset: % cube_match=% sphere_match=%",
-                    path_string,
-                    store_paths_equal(path_string, store.cube_mesh.asset.path),
-                    store_paths_equal(path_string, store.sphere_mesh.asset.path)
-                );
-                platform.system.log(.{ data = message.data, count = message.count });
-            }
             if store_paths_equal(path_string, store.geometry_shader.asset.path) {
                 store_set_blob_asset(*store.geometry_shader.asset, data);
             }
             if store_paths_equal(path_string, store.gui_shader.asset.path) {
                 store_set_blob_asset(*store.gui_shader.asset, data);
             }
+            if store_paths_equal(path_string, store.empty_tile.asset.path) {
+                store_set_blob_asset(*store.empty_tile.asset, data);
+                log(platform, "Store promoting empty tile mesh");
+                store_promote_obj_mesh(*store.empty_tile, store);
+                log(platform, "Store promoted empty tile mesh");
+            }
+            if store_paths_equal(path_string, store.methane.asset.path) {
+                store_set_blob_asset(*store.methane.asset, data);
+                log(platform, "Store promoting methane mesh");
+                store_promote_obj_mesh(*store.methane, store);
+                log(platform, "Store promoted methane mesh");
+            }
             if store_paths_equal(path_string, store.cube_mesh.asset.path) {
                 store_set_blob_asset(*store.cube_mesh.asset, data);
-                if platform.system.log {
-                    message := "Store promoting cube mesh";
-                    platform.system.log(.{ data = message.data, count = message.count });
-                }
+                log(platform, "Store promoting cube mesh");
                 store_promote_obj_mesh(*store.cube_mesh, store);
-                if platform.system.log {
-                    message := "Store promoted cube mesh";
-                    platform.system.log(.{ data = message.data, count = message.count });
-                }
+                log(platform, "Store promoted cube mesh");
             }
             if store_paths_equal(path_string, store.sphere_mesh.asset.path) {
                 store_set_blob_asset(*store.sphere_mesh.asset, data);
-                if platform.system.log {
-                    message := "Store promoting sphere mesh";
-                    platform.system.log(.{ data = message.data, count = message.count });
-                }
+                log(platform, "Store promoting sphere mesh");
                 store_promote_obj_mesh(*store.sphere_mesh, store);
-                if platform.system.log {
-                    message := "Store promoted sphere mesh";
-                    platform.system.log(.{ data = message.data, count = message.count });
-                }
+                log(platform, "Store promoted sphere mesh");
             }
             if store_paths_equal(path_string, store.verdana_font.metrics_asset.path) {
                 store_set_blob_asset(*store.verdana_font.metrics_asset, data);
@@ -408,17 +495,11 @@ store_load_blob :: (store: *Store, blob: [] u8, platform: *Platform) {
             }
         }
         if atlas_loaded {
-            if platform.system.log {
-                message := "Store promoting font atlas";
-                platform.system.log(.{ data = message.data, count = message.count });
-            }
+            log(platform, "Store promoting font atlas");
             store_promote_qoi_texture(*store.verdana_font.atlas, store, platform);
         }
         if metrics_loaded || atlas_loaded {
-            if platform.system.log {
-                message := "Store promoting font metrics";
-                platform.system.log(.{ data = message.data, count = message.count });
-            }
+            log(platform, "Store promoting font metrics");
             store_promote_font_metrics(*store.verdana_font, store);
         }
     }

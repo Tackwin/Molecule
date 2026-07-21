@@ -5,6 +5,12 @@ store_upload_gpu_assets :: (store: *Store, renderer: *Renderer, platform: *Platf
     if !renderer_upload_mesh_asset(renderer, platform, *store.sphere_mesh) {
         return false;
     }
+    if !renderer_upload_mesh_asset(renderer, platform, *store.empty_tile) {
+        return false;
+    }
+    if !renderer_upload_mesh_asset(renderer, platform, *store.methane) {
+        return false;
+    }
     if !renderer_upload_texture_asset(renderer, platform, *store.verdana_font.atlas) {
         return false;
     }

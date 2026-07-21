@@ -42,6 +42,7 @@ build_assets_blob :: () {
     for files {
         relative_path := advance(it, "Assets/".count);
         stem := asset_blob_stem(relative_path);
+        print("Adding asset to blob: %\n", relative_path);
         group: *Asset_Blob_Group;
         for *candidate: groups {
             if candidate.stem == stem {
