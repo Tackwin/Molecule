@@ -1,6 +1,8 @@
 #import "Basic";
 #import "String";
 #import "Pool";
+#import "Hash";
+#import "Hash_Table";
 #import "platform";
 #import "Algebra";
 #import "Qoi";
@@ -22,17 +24,25 @@ Store_Asset :: struct {
 Mesh_Vertex :: struct {
     position: V3f;
     position_padding: float32;
-    normal: V3f;
-    normal_padding: float32;
     uv: V2f;
     uv_padding: V2f;
+}
+
+Mesh_Triangle :: struct {
+    normal: V3f;
+    normal_padding: float32;
+    edge_cavity: V3f;
+    cavity_padding: float32;
 }
 
 Mesh_Asset :: struct {
     asset: Store_Asset;
     vertices: [..] Mesh_Vertex;
+    triangles: [..] Mesh_Triangle;
     gpu_vertex_offset: u32;
     gpu_vertex_count: u32;
+    gpu_triangle_offset: u32;
+    gpu_triangle_count: u32;
     gpu_uploaded_asset_version: u32;
 }
 
@@ -174,13 +184,111 @@ store_promote_font_metrics :: (font: *Font_Asset, store: *Store) {
     }
 }
 
+store_build_mesh_triangles :: (mesh: *Mesh_Asset, store: *Store) {
+    Edge_Key :: struct {
+        a: V3f;
+        b: V3f;
+    }
+
+    Edge_Use :: struct {
+        triangle_indices: [2] s32;
+        edge_indices: [2] s32;
+        count: s32;
+    }
+
+    position_less :: (a: V3f, b: V3f) -> bool {
+        if a.x != b.x return a.x < b.x;
+        if a.y != b.y return a.y < b.y;
+        return a.z < b.z;
+    }
+
+    make_edge_key :: (start: V3f, end: V3f) -> Edge_Key {
+        if position_less(end, start) {
+            return .{ end, start };
+        }
+        return .{ start, end };
+    }
+
+    hash_edge_key :: (key: Edge_Key) -> u32 {
+        hash := sdbm_float_hash(*key.a.x, 3);
+        return sdbm_float_hash(*key.b.x, 3, hash);
+    }
+
+    compare_edge_keys :: (a: Edge_Key, b: Edge_Key) -> bool {
+        return a.a == b.a && a.b == b.b;
+    }
+
+    get_triangle_edge :: (mesh: *Mesh_Asset, triangle_index: int, edge_index: int) -> V3f, V3f {
+        vertex_offset := triangle_index * 3;
+        if edge_index == 0 {
+            return mesh.vertices[vertex_offset + 1].position, mesh.vertices[vertex_offset + 2].position;
+        }
+        if edge_index == 1 {
+            return mesh.vertices[vertex_offset + 2].position, mesh.vertices[vertex_offset + 0].position;
+        }
+        return mesh.vertices[vertex_offset + 0].position, mesh.vertices[vertex_offset + 1].position;
+    }
+
+    set_edge_cavity :: (triangle: *Mesh_Triangle, edge_index: int, cavity: float32) {
+        if edge_index == 0 {
+            triangle.edge_cavity.x = cavity;
+        } else if edge_index == 1 {
+            triangle.edge_cavity.y = cavity;
+        } else {
+            triangle.edge_cavity.z = cavity;
+        }
+    }
+
+    triangle_count := mesh.vertices.count / 3;
+    mesh.triangles.allocator = .{ store.pool_allocator_proc, *store.pool };
+    array_resize(*mesh.triangles, triangle_count);
+    for triangle_index: 0..triangle_count - 1 {
+        vertex_offset := triangle_index * 3;
+        p0 := mesh.vertices[vertex_offset + 0].position;
+        p1 := mesh.vertices[vertex_offset + 1].position;
+        p2 := mesh.vertices[vertex_offset + 2].position;
+        triangle: Mesh_Triangle = .{};
+        triangle.normal = normalize(cross(p1 - p0, p2 - p0));
+        mesh.triangles[triangle_index] = triangle;
+    }
+
+    edge_uses: Table(Edge_Key, Edge_Use, hash_edge_key, compare_edge_keys);
+    edge_uses.allocator = temp;
+    init(*edge_uses, triangle_count * 6);
+    for triangle_index: 0..triangle_count - 1 {
+        for edge_index: 0..2 {
+            edge_start, edge_end := get_triangle_edge(mesh, triangle_index, edge_index);
+            key := make_edge_key(edge_start, edge_end);
+            edge_use, _ := find_or_add(*edge_uses, key);
+            if edge_use.count < 2 {
+                edge_use.triangle_indices[edge_use.count] = cast(s32) triangle_index;
+                edge_use.edge_indices[edge_use.count] = cast(s32) edge_index;
+            }
+            edge_use.count += 1;
+        }
+    }
+
+    for edge_uses {
+        if it.count != 2 continue;
+        for side: 0..1 {
+            triangle_index := cast(int) it.triangle_indices[side];
+            edge_index := cast(int) it.edge_indices[side];
+            neighbor_index := cast(int) it.triangle_indices[1 - side];
+            edge_start, edge_end := get_triangle_edge(mesh, triangle_index, edge_index);
+            edge_direction := normalize(edge_end - edge_start);
+            normal := mesh.triangles[triangle_index].normal;
+            neighbor_normal := mesh.triangles[neighbor_index].normal;
+            signed_dihedral := dot(edge_direction, cross(normal, neighbor_normal));
+            set_edge_cavity(*mesh.triangles[triangle_index], edge_index, signed_dihedral);
+        }
+    }
+}
+
 store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
     if mesh.asset.bytes.count == 0 || mesh.vertices.count > 0 return;
     mesh.vertices.allocator = .{ store.pool_allocator_proc, *store.pool };
     positions: [..] V3f;
     positions.allocator = temp;
-    normals: [..] V3f;
-    normals.allocator = temp;
     uvs: [..] V2f;
     uvs.allocator = temp;
     text: string = .{ data = mesh.asset.bytes.data, count = mesh.asset.bytes.count };
@@ -192,14 +300,9 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
             continue;
 
         position: V3f;
-        normal: V3f;
         uv: V2f;
         if scan2(line, "v % % %", *position.x, *position.y, *position.z) {
             array_add(*positions, position);
-            continue;
-        }
-        if scan2(line, "vn % % %", *normal.x, *normal.y, *normal.z) {
-            array_add(*normals, normal);
             continue;
         }
         if scan2(line, "vt % %", *uv.x, *uv.y) {
@@ -220,15 +323,13 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
             ok := true;
             for 0..2
                 ok &= 0 < v_indices[it] && v_indices[it] <= positions.count
-                    && 0 < n_indices[it] && n_indices[it] <= normals.count
                     && 0 < t_indices[it] && t_indices[it] <= uvs.count;
             if !ok
                 continue;
 
             for 0..2 {
-                v: Mesh_Vertex;
+                v: Mesh_Vertex = .{};
                 v.position = positions[v_indices[it] - 1];
-                v.normal = normals[n_indices[it] - 1];
                 v.uv = uvs[t_indices[it] - 1];
                 array_add(*mesh.vertices, v);
             }
@@ -238,15 +339,13 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
             *n_indices[2]) {
             ok := true;
             for 0..2
-                ok &= 0 < v_indices[it] && v_indices[it] <= positions.count
-                    && 0 < n_indices[it] && n_indices[it] <= normals.count;
+                ok &= 0 < v_indices[it] && v_indices[it] <= positions.count;
             if !ok
                 continue;
 
             for 0..2 {
-                v: Mesh_Vertex;
+                v: Mesh_Vertex = .{};
                 v.position = positions[v_indices[it] - 1];
-                v.normal = normals[n_indices[it] - 1];
                 array_add(*mesh.vertices, v);
             }
             continue;
@@ -260,14 +359,9 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
             if !ok
                 continue;
 
-            face_normal := normalize(cross(
-                positions[v_indices[1] - 1] - positions[v_indices[0] - 1],
-                positions[v_indices[2] - 1] - positions[v_indices[0] - 1]
-            ));
             for 0..2 {
-                v: Mesh_Vertex;
+                v: Mesh_Vertex = .{};
                 v.position = positions[v_indices[it] - 1];
-                v.normal = face_normal;
                 v.uv = uvs[t_indices[it] - 1];
                 array_add(*mesh.vertices, v);
             }
@@ -280,22 +374,19 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
             if !ok
                 continue;
 
-            face_normal := normalize(cross(
-                positions[v_indices[1] - 1] - positions[v_indices[0] - 1],
-                positions[v_indices[2] - 1] - positions[v_indices[0] - 1]
-            ));
             for 0..2 {
-                v: Mesh_Vertex;
+                v: Mesh_Vertex = .{};
                 v.position = positions[v_indices[it] - 1];
-                v.normal = face_normal;
                 array_add(*mesh.vertices, v);
             }
             continue;
         }
     }
-    if mesh.vertices.count == 0 {
+    if mesh.vertices.count == 0 || mesh.vertices.count % 3 != 0 {
         mesh.asset.state = .FAILED;
+        return;
     }
+    store_build_mesh_triangles(mesh, store);
 }
 
 store_request_raw_asset :: (asset: *Store_Asset, platform: *Platform) {
@@ -348,6 +439,13 @@ store_request_changed_shader :: (store: *Store, path: string, platform: *Platfor
         }
         store_request_raw_asset(*store.gui_shader.asset, platform);
     }
+    if ends_with(path, store.post_shader.asset.path) {
+        if platform.system.log {
+            message := tprint("shader file changed: %", path);
+            platform.system.log(.{ data = message.data, count = message.count });
+        }
+        store_request_raw_asset(*store.post_shader.asset, platform);
+    }
 }
 
 store_update_shader_hot_reload :: (store: *Store, platform: *Platform) {
@@ -360,6 +458,7 @@ store_update_shader_hot_reload :: (store: *Store, platform: *Platform) {
     }
     store_update_raw_asset(store, *store.geometry_shader.asset, platform);
     store_update_raw_asset(store, *store.gui_shader.asset, platform);
+    store_update_raw_asset(store, *store.post_shader.asset, platform);
 }
 
 store_init :: (store: *Store, platform: *Platform) {

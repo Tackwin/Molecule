@@ -94,12 +94,11 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
     }
 
     aspect_ratio := cast(float32) input.framebuffer_size_pixels.x / cast(float32) input.framebuffer_size_pixels.y;
-    camera: Render_Camera = .{};
-    camera.view_projection = camera_view_projection(state.camera, aspect_ratio);
+    camera := camera_render_data(state.camera, aspect_ratio, state.cavity);
     if state.gui_demo_open {
         renderer_render_gui_demo(state, input);
     } else {
-        gui_quad(*state.gui, .{ 12, 12 }, .{ 280, 102 }, .{ 0.02, 0.05, 0.1, 0.88 }, 1);
+        gui_quad(*state.gui, .{ 12, 12 }, .{ 300, 416 }, .{ 0.02, 0.05, 0.1, 0.88 }, 1);
         gui_begin_column(*state.gui, .{ 22, 21 }, 2);
         gui_label_flow(*state.gui, "Molecule", 20, .{ 0.82, 0.92, 1, 1 }, 1);
         gui_label_flow(*state.gui, "ZQSD / arrows: move    wheel: zoom", 12, .{ 0.65, 0.75, 0.9, 1 });
@@ -109,6 +108,20 @@ renderer_render_game :: (state: *Game_State, input: *Frame_Input, platform: *Pla
             camera_init(*state.camera);
         }
         gui_pop_layout(*state.gui);
+        gui_separator_flow(*state.gui, 280);
+        gui_label_flow(*state.gui, "Cavity", 16, .{ 0.82, 0.92, 1, 1 });
+        gui_label_flow(*state.gui, tprint("Strength: %", state.cavity.strength), 12, .{ 0.65, 0.75, 0.9, 1 });
+        gui_slider_float_flow(*state.gui, "cavity_strength", *state.cavity.strength, 0, 2, 280);
+        gui_label_flow(*state.gui, tprint("Normal threshold: %", state.cavity.normal_threshold), 12, .{ 0.65, 0.75, 0.9, 1 });
+        gui_slider_float_flow(*state.gui, "cavity_normal_threshold", *state.cavity.normal_threshold, 0, 1, 280);
+        gui_label_flow(*state.gui, tprint("Object width: %", state.cavity.width), 12, .{ 0.65, 0.75, 0.9, 1 });
+        gui_slider_float_flow(*state.gui, "cavity_width", *state.cavity.width, 0.005, 0.3, 280);
+        gui_label_flow(*state.gui, tprint("Fade start: %", state.cavity.fade_start), 12, .{ 0.65, 0.75, 0.9, 1 });
+        gui_slider_float_flow(*state.gui, "cavity_fade_start", *state.cavity.fade_start, 0, 150, 280);
+        gui_label_flow(*state.gui, tprint("Fade end: %", state.cavity.fade_end), 12, .{ 0.65, 0.75, 0.9, 1 });
+        gui_slider_float_flow(*state.gui, "cavity_fade_end", *state.cavity.fade_end, 1, 200, 280);
+        gui_label_flow(*state.gui, tprint("Minimum screen width: % px", state.cavity.minimum_projected_width), 12, .{ 0.65, 0.75, 0.9, 1 });
+        gui_slider_float_flow(*state.gui, "cavity_minimum_projected_width", *state.cavity.minimum_projected_width, 0.25, 3, 280);
         gui_pop_layout(*state.gui);
     }
     renderer_draw(

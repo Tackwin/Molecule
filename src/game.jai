@@ -12,7 +12,7 @@ GRID_ROWS :: 15;
 GRID_SPACING :: 2.2;
 WATER_MOLECULE_COUNT :: 100;
 WATER_HEIGHT :: 2.1;
-WATER_SPEED :: 1.0;
+WATER_SPEED :: 0.05;
 MOUSE_BUTTON_LEFT :: 1;
 MOUSE_BUTTON_RIGHT :: 2;
 
@@ -51,10 +51,19 @@ camera_init :: (camera: *Camera) {
     camera.position = normalize(camera.position) * 50;
 }
 
-camera_view_projection :: (camera: Camera, aspect_ratio: float32) -> M4f {
+camera_render_data :: (camera: Camera, aspect_ratio: float32, cavity: Cavity_Settings) -> Render_Camera {
     view := m4_look_at(camera.position, camera.target, camera.up);
     projection := m4_perspective(camera.focal_length, aspect_ratio, camera.near_plane, camera.far_plane);
-    return projection * view;
+    return .{
+        view_projection = projection * view,
+        position = camera.position,
+        cavity_strength = cavity.strength,
+        cavity_normal_threshold = cavity.normal_threshold,
+        cavity_width = cavity.width,
+        cavity_fade_start = cavity.fade_start,
+        cavity_fade_end = cavity.fade_end,
+        cavity_minimum_projected_width = cavity.minimum_projected_width,
+    };
 }
 
 camera_ground_point_under_cursor :: (
@@ -192,6 +201,7 @@ Game_State :: struct {
     gui_demo_open: bool;
     gui_demo_checkbox: bool;
     gui_demo_slider: float32;
+    cavity: Cavity_Settings;
     capture_frame_index: u64;
     capture_rgba: [..] u8;
     capture_pixels: [..] Qoi_Pixel;
@@ -202,6 +212,12 @@ game_start :: (state: *Game_State, platform: *Platform, seed: u64, width: u32, h
     state.* = .{};
     state.deterministic_seed = seed;
     state.gui_demo_slider = 0.65;
+    state.cavity.strength = 0.65;
+    state.cavity.normal_threshold = 0.02;
+    state.cavity.width = 0.08;
+    state.cavity.fade_start = 20.0;
+    state.cavity.fade_end = 90.0;
+    state.cavity.minimum_projected_width = 1.25;
     camera_init(*state.camera);
     for 0..WATER_MOLECULE_COUNT - 1 {
         state.water_molecules[it].lane = cast(s32) (it % GRID_ROWS);

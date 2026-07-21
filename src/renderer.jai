@@ -7,6 +7,7 @@
 
 MAX_RENDER_INSTANCES :: 1024;
 MAX_RENDER_GEOMETRY_VERTICES :: 4096;
+MAX_RENDER_GEOMETRY_TRIANGLES :: MAX_RENDER_GEOMETRY_VERTICES / 3;
 MAX_RENDER_DRAW_BATCHES :: 16;
 MAX_GUI_RENDER_INSTANCES :: GUI_MAX_QUADS;
 RENDER_SAMPLE_COUNT :: 4;
@@ -16,13 +17,32 @@ Render_Instance :: struct {
     model: M4f;
     color: V4f;
     vertex_offset: u32;
+    triangle_offset: u32;
     flags: u32;
-    padding1: u32;
-    padding2: u32;
+    padding: u32;
 }
 
 Render_Camera :: struct {
     view_projection: M4f;
+    position: V3f;
+    cavity_strength: float32;
+    cavity_normal_threshold: float32;
+    cavity_width: float32;
+    cavity_fade_start: float32;
+    cavity_fade_end: float32;
+    cavity_minimum_projected_width: float32;
+    padding_0: float32;
+    padding_1: float32;
+    padding_2: float32;
+}
+
+Cavity_Settings :: struct {
+    strength: float32;
+    normal_threshold: float32;
+    width: float32;
+    fade_start: float32;
+    fade_end: float32;
+    minimum_projected_width: float32;
 }
 
 Gui_Render_Uniform :: struct {
@@ -55,10 +75,10 @@ Renderer :: struct {
     queue: WGPUQueue;
     surface: WGPUSurface;
     pipeline: WGPURenderPipeline;
-    gbuffer_pipeline: WGPURenderPipeline;
     post_pipeline: WGPURenderPipeline;
     camera_buffer: WGPUBuffer;
     geometry_buffer: WGPUBuffer;
+    triangle_buffer: WGPUBuffer;
     instance_buffer: WGPUBuffer;
     depth_texture: WGPUTexture;
     depth_view: WGPUTextureView;
@@ -72,14 +92,9 @@ Renderer :: struct {
     multibuffer_color_view: WGPUTextureView;
     multibuffer_color_msaa_texture: WGPUTexture;
     multibuffer_color_msaa_view: WGPUTextureView;
-    multibuffer_normal_texture: WGPUTexture;
-    multibuffer_normal_view: WGPUTextureView;
-    multibuffer_depth_texture: WGPUTexture;
-    multibuffer_depth_view: WGPUTextureView;
     multibuffer_width: u32;
     multibuffer_height: u32;
     bind_group: WGPUBindGroup;
-    gbuffer_bind_group: WGPUBindGroup;
     post_bind_group: WGPUBindGroup;
     post_sampler: WGPUSampler;
     gui_pipeline: WGPURenderPipeline;
@@ -91,7 +106,10 @@ Renderer :: struct {
     geometry_shader_attempted_version: u32;
     gui_shader_version: u32;
     gui_shader_attempted_version: u32;
+    post_shader_version: u32;
+    post_shader_attempted_version: u32;
     geometry_vertex_count: u32;
+    geometry_triangle_count: u32;
     instances: [..] Render_Instance;
     draw_batches: [..] Render_Draw_Batch;
     gui_instances: [..] Gui_Render_Instance;
@@ -305,14 +323,8 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     if renderer.bind_group && gpu.wgpuBindGroupRelease {
         gpu.wgpuBindGroupRelease(renderer.bind_group);
     }
-    if renderer.gbuffer_bind_group && gpu.wgpuBindGroupRelease {
-        gpu.wgpuBindGroupRelease(renderer.gbuffer_bind_group);
-    }
     if renderer.pipeline && gpu.wgpuRenderPipelineRelease {
         gpu.wgpuRenderPipelineRelease(renderer.pipeline);
-    }
-    if renderer.gbuffer_pipeline && gpu.wgpuRenderPipelineRelease {
-        gpu.wgpuRenderPipelineRelease(renderer.gbuffer_pipeline);
     }
     if renderer.post_pipeline && gpu.wgpuRenderPipelineRelease {
         gpu.wgpuRenderPipelineRelease(renderer.post_pipeline);
@@ -347,18 +359,6 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     if renderer.multibuffer_color_msaa_texture && gpu.wgpuTextureRelease {
         gpu.wgpuTextureRelease(renderer.multibuffer_color_msaa_texture);
     }
-    if renderer.multibuffer_normal_view && gpu.wgpuTextureViewRelease {
-        gpu.wgpuTextureViewRelease(renderer.multibuffer_normal_view);
-    }
-    if renderer.multibuffer_normal_texture && gpu.wgpuTextureRelease {
-        gpu.wgpuTextureRelease(renderer.multibuffer_normal_texture);
-    }
-    if renderer.multibuffer_depth_view && gpu.wgpuTextureViewRelease {
-        gpu.wgpuTextureViewRelease(renderer.multibuffer_depth_view);
-    }
-    if renderer.multibuffer_depth_texture && gpu.wgpuTextureRelease {
-        gpu.wgpuTextureRelease(renderer.multibuffer_depth_texture);
-    }
     if renderer.post_bind_group && gpu.wgpuBindGroupRelease {
         gpu.wgpuBindGroupRelease(renderer.post_bind_group);
     }
@@ -391,6 +391,9 @@ renderer_unload :: (renderer: *Renderer, platform: *Platform) {
     }
     if renderer.geometry_buffer && gpu.wgpuBufferRelease {
         gpu.wgpuBufferRelease(renderer.geometry_buffer);
+    }
+    if renderer.triangle_buffer && gpu.wgpuBufferRelease {
+        gpu.wgpuBufferRelease(renderer.triangle_buffer);
     }
     if renderer.camera_buffer && gpu.wgpuBufferRelease {
         gpu.wgpuBufferRelease(renderer.camera_buffer);
@@ -485,18 +488,6 @@ renderer_resize_multibuffer_targets :: (renderer: *Renderer, platform: *Platform
     if renderer.multibuffer_color_msaa_texture && gpu.wgpuTextureRelease {
         gpu.wgpuTextureRelease(renderer.multibuffer_color_msaa_texture);
     }
-    if renderer.multibuffer_normal_view && gpu.wgpuTextureViewRelease {
-        gpu.wgpuTextureViewRelease(renderer.multibuffer_normal_view);
-    }
-    if renderer.multibuffer_normal_texture && gpu.wgpuTextureRelease {
-        gpu.wgpuTextureRelease(renderer.multibuffer_normal_texture);
-    }
-    if renderer.multibuffer_depth_view && gpu.wgpuTextureViewRelease {
-        gpu.wgpuTextureViewRelease(renderer.multibuffer_depth_view);
-    }
-    if renderer.multibuffer_depth_texture && gpu.wgpuTextureRelease {
-        gpu.wgpuTextureRelease(renderer.multibuffer_depth_texture);
-    }
 
     color_descriptor: WGPUTextureDescriptor = .{};
     color_descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
@@ -514,19 +505,6 @@ renderer_resize_multibuffer_targets :: (renderer: *Renderer, platform: *Platform
     renderer.multibuffer_color_msaa_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *color_msaa_descriptor);
     renderer.multibuffer_color_msaa_view = gpu.wgpuTextureCreateView(renderer.multibuffer_color_msaa_texture, null);
 
-    normal_descriptor := color_descriptor;
-    renderer.multibuffer_normal_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *normal_descriptor);
-    renderer.multibuffer_normal_view = gpu.wgpuTextureCreateView(renderer.multibuffer_normal_texture, null);
-
-    depth_descriptor: WGPUTextureDescriptor = .{};
-    depth_descriptor.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-    depth_descriptor.dimension = ._2D;
-    depth_descriptor.size = .{ width, height, 1 };
-    depth_descriptor.format = .Depth32Float;
-    depth_descriptor.mipLevelCount = 1;
-    depth_descriptor.sampleCount = 1;
-    renderer.multibuffer_depth_texture = gpu.wgpuDeviceCreateTexture(renderer.device, *depth_descriptor);
-    renderer.multibuffer_depth_view = gpu.wgpuTextureCreateView(renderer.multibuffer_depth_texture, null);
     renderer.multibuffer_width = width;
     renderer.multibuffer_height = height;
     if renderer.post_pipeline && renderer.post_sampler {
@@ -616,22 +594,6 @@ renderer_create_geometry_pipeline :: (
         .RGBA16Float,
         .Depth24Plus,
         RENDER_SAMPLE_COUNT
-    );
-}
-
-renderer_create_gbuffer_pipeline :: (
-    renderer: *Renderer,
-    platform: *Platform,
-    shader: *Shader_Asset
-) -> WGPURenderPipeline {
-    return renderer_create_geometry_pipeline_variant(
-        renderer,
-        platform,
-        shader,
-        "fs_gbuffer",
-        .RGBA16Float,
-        .Depth32Float,
-        1
     );
 }
 
@@ -768,6 +730,9 @@ renderer_create_post_bind_group :: (
     gpu := *platform.gpu;
     layout := gpu.wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
     entries: [2] WGPUBindGroupEntry;
+    for 0..entries.count - 1 {
+        entries[it] = .{};
+    }
     entries[0].binding = 0;
     entries[0].textureView = renderer.multibuffer_color_view;
     entries[1].binding = 1;
@@ -789,12 +754,13 @@ renderer_create_geometry_bind_group :: (
     pipeline: WGPURenderPipeline,
     palette: *Texture_Asset
 ) -> WGPUBindGroup {
-    if !pipeline || !renderer.camera_buffer || !renderer.geometry_buffer || !renderer.instance_buffer ||
+    if !pipeline || !renderer.camera_buffer || !renderer.geometry_buffer || !renderer.triangle_buffer || !renderer.instance_buffer ||
         !palette.gpu_view || !palette.gpu_sampler return null;
     gpu := *platform.gpu;
     geometry_bytes := cast(u64) MAX_RENDER_GEOMETRY_VERTICES * size_of(Mesh_Vertex);
+    triangle_bytes := cast(u64) MAX_RENDER_GEOMETRY_TRIANGLES * size_of(Mesh_Triangle);
     layout := gpu.wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
-    entries: [5] WGPUBindGroupEntry;
+    entries: [6] WGPUBindGroupEntry;
     for 0..entries.count - 1 {
         entries[it] = .{};
     }
@@ -808,9 +774,12 @@ renderer_create_geometry_bind_group :: (
     entries[2].buffer = renderer.instance_buffer;
     entries[2].size = MAX_RENDER_INSTANCES * size_of(Render_Instance);
     entries[3].binding = 3;
-    entries[3].textureView = palette.gpu_view;
+    entries[3].buffer = renderer.triangle_buffer;
+    entries[3].size = triangle_bytes;
     entries[4].binding = 4;
-    entries[4].sampler = palette.gpu_sampler;
+    entries[4].textureView = palette.gpu_view;
+    entries[5].binding = 5;
+    entries[5].sampler = palette.gpu_sampler;
     descriptor: WGPUBindGroupDescriptor = .{};
     descriptor.layout = layout;
     descriptor.entryCount = entries.count;
@@ -864,32 +833,20 @@ renderer_rebuild_asset_bind_groups :: (
 ) -> bool {
     geometry_bind_group := renderer_create_geometry_bind_group(renderer, platform, renderer.pipeline, palette);
     if !geometry_bind_group return false;
-    gbuffer_bind_group := renderer_create_geometry_bind_group(renderer, platform, renderer.gbuffer_pipeline, palette);
-    if !gbuffer_bind_group {
-        if platform.gpu.wgpuBindGroupRelease {
-            platform.gpu.wgpuBindGroupRelease(geometry_bind_group);
-        }
-        return false;
-    }
     gui_bind_group := renderer_create_gui_bind_group(renderer, platform, renderer.gui_pipeline, font_atlas);
     if !gui_bind_group {
         if platform.gpu.wgpuBindGroupRelease {
             platform.gpu.wgpuBindGroupRelease(geometry_bind_group);
-            platform.gpu.wgpuBindGroupRelease(gbuffer_bind_group);
         }
         return false;
     }
     if renderer.bind_group && platform.gpu.wgpuBindGroupRelease {
         platform.gpu.wgpuBindGroupRelease(renderer.bind_group);
     }
-    if renderer.gbuffer_bind_group && platform.gpu.wgpuBindGroupRelease {
-        platform.gpu.wgpuBindGroupRelease(renderer.gbuffer_bind_group);
-    }
     if renderer.gui_bind_group && platform.gpu.wgpuBindGroupRelease {
         platform.gpu.wgpuBindGroupRelease(renderer.gui_bind_group);
     }
     renderer.bind_group = geometry_bind_group;
-    renderer.gbuffer_bind_group = gbuffer_bind_group;
     renderer.gui_bind_group = gui_bind_group;
     return true;
 }
@@ -938,16 +895,20 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     gpu.wgpuSurfaceConfigure(renderer.surface, *config);
 
     renderer.pipeline = renderer_create_geometry_pipeline(renderer, platform, *store.geometry_shader);
-    renderer.gbuffer_pipeline = renderer_create_gbuffer_pipeline(renderer, platform, *store.geometry_shader);
     renderer.gui_pipeline = renderer_create_gui_pipeline(renderer, platform, *store.gui_shader);
     renderer.post_pipeline = renderer_create_post_pipeline(renderer, platform, *store.post_shader);
-    if !renderer.pipeline || !renderer.gbuffer_pipeline || !renderer.gui_pipeline || !renderer.post_pipeline return;
+    if !renderer.pipeline || !renderer.gui_pipeline || !renderer.post_pipeline return;
 
     geometry_bytes := cast(u64) MAX_RENDER_GEOMETRY_VERTICES * size_of(Mesh_Vertex);
     geometry_descriptor: WGPUBufferDescriptor = .{};
     geometry_descriptor.size = geometry_bytes;
     geometry_descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     renderer.geometry_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *geometry_descriptor);
+    triangle_bytes := cast(u64) MAX_RENDER_GEOMETRY_TRIANGLES * size_of(Mesh_Triangle);
+    triangle_descriptor: WGPUBufferDescriptor = .{};
+    triangle_descriptor.size = triangle_bytes;
+    triangle_descriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    renderer.triangle_buffer = gpu.wgpuDeviceCreateBuffer(renderer.device, *triangle_descriptor);
 
     camera_descriptor: WGPUBufferDescriptor = .{};
     camera_descriptor.size = size_of(Render_Camera);
@@ -989,6 +950,8 @@ renderer_init :: (renderer: *Renderer, platform: *Platform, width: u32, height: 
     renderer.geometry_shader_attempted_version = store.geometry_shader.asset.version;
     renderer.gui_shader_version = store.gui_shader.asset.version;
     renderer.gui_shader_attempted_version = store.gui_shader.asset.version;
+    renderer.post_shader_version = store.post_shader.asset.version;
+    renderer.post_shader_attempted_version = store.post_shader.asset.version;
     renderer.ready = true;
 }
 
@@ -998,7 +961,7 @@ renderer_begin_instances :: (renderer: *Renderer) {
 }
 
 renderer_upload_mesh_asset :: (renderer: *Renderer, platform: *Platform, mesh: *Mesh_Asset) -> bool {
-    if !renderer.ready || mesh.vertices.count == 0 {
+    if !renderer.ready || mesh.vertices.count == 0 || mesh.triangles.count != mesh.vertices.count / 3 {
         return false;
     }
     if mesh.gpu_uploaded_asset_version == mesh.asset.version {
@@ -1007,13 +970,22 @@ renderer_upload_mesh_asset :: (renderer: *Renderer, platform: *Platform, mesh: *
     if renderer.geometry_vertex_count + mesh.vertices.count > MAX_RENDER_GEOMETRY_VERTICES {
         return false;
     }
+    if renderer.geometry_triangle_count + mesh.triangles.count > MAX_RENDER_GEOMETRY_TRIANGLES {
+        return false;
+    }
     mesh.gpu_vertex_offset = renderer.geometry_vertex_count;
     mesh.gpu_vertex_count = xx mesh.vertices.count;
-    byte_offset := cast(u64) mesh.gpu_vertex_offset * size_of(Mesh_Vertex);
-    byte_count := cast(u64) mesh.vertices.count * size_of(Mesh_Vertex);
+    mesh.gpu_triangle_offset = renderer.geometry_triangle_count;
+    mesh.gpu_triangle_count = xx mesh.triangles.count;
+    vertex_byte_offset := cast(u64) mesh.gpu_vertex_offset * size_of(Mesh_Vertex);
+    vertex_byte_count := cast(u64) mesh.vertices.count * size_of(Mesh_Vertex);
+    triangle_byte_offset := cast(u64) mesh.gpu_triangle_offset * size_of(Mesh_Triangle);
+    triangle_byte_count := cast(u64) mesh.triangles.count * size_of(Mesh_Triangle);
     gpu := *platform.gpu;
-    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.geometry_buffer, byte_offset, mesh.vertices.data, byte_count);
+    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.geometry_buffer, vertex_byte_offset, mesh.vertices.data, vertex_byte_count);
+    gpu.wgpuQueueWriteBuffer(renderer.queue, renderer.triangle_buffer, triangle_byte_offset, mesh.triangles.data, triangle_byte_count);
     renderer.geometry_vertex_count += mesh.gpu_vertex_count;
+    renderer.geometry_triangle_count += mesh.gpu_triangle_count;
     mesh.gpu_uploaded_asset_version = mesh.asset.version;
     return true;
 }
@@ -1078,40 +1050,17 @@ renderer_reload_geometry_shader :: (
     renderer.geometry_shader_attempted_version = shader.asset.version;
     new_pipeline := renderer_create_geometry_pipeline(renderer, platform, shader);
     if !new_pipeline return false;
-    new_gbuffer_pipeline := renderer_create_gbuffer_pipeline(renderer, platform, shader);
-    if !new_gbuffer_pipeline {
-        if platform.gpu.wgpuRenderPipelineRelease {
-            platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
-        }
-        return false;
-    }
     new_bind_group := renderer_create_geometry_bind_group(renderer, platform, new_pipeline, palette);
     if !new_bind_group {
         if platform.gpu.wgpuRenderPipelineRelease {
             platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
-            platform.gpu.wgpuRenderPipelineRelease(new_gbuffer_pipeline);
-        }
-        return false;
-    }
-    new_gbuffer_bind_group := renderer_create_geometry_bind_group(renderer, platform, new_gbuffer_pipeline, palette);
-    if !new_gbuffer_bind_group {
-        if platform.gpu.wgpuBindGroupRelease {
-            platform.gpu.wgpuBindGroupRelease(new_bind_group);
-        }
-        if platform.gpu.wgpuRenderPipelineRelease {
-            platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
-            platform.gpu.wgpuRenderPipelineRelease(new_gbuffer_pipeline);
         }
         return false;
     }
     old_pipeline := renderer.pipeline;
-    old_gbuffer_pipeline := renderer.gbuffer_pipeline;
     old_bind_group := renderer.bind_group;
-    old_gbuffer_bind_group := renderer.gbuffer_bind_group;
     renderer.pipeline = new_pipeline;
-    renderer.gbuffer_pipeline = new_gbuffer_pipeline;
     renderer.bind_group = new_bind_group;
-    renderer.gbuffer_bind_group = new_gbuffer_bind_group;
     renderer.geometry_shader_version = shader.asset.version;
     if platform.system.log {
         message := tprint("geometry shader pipeline reloaded, version %", shader.asset.version);
@@ -1120,14 +1069,8 @@ renderer_reload_geometry_shader :: (
     if old_bind_group && platform.gpu.wgpuBindGroupRelease {
         platform.gpu.wgpuBindGroupRelease(old_bind_group);
     }
-    if old_gbuffer_bind_group && platform.gpu.wgpuBindGroupRelease {
-        platform.gpu.wgpuBindGroupRelease(old_gbuffer_bind_group);
-    }
     if old_pipeline && platform.gpu.wgpuRenderPipelineRelease {
         platform.gpu.wgpuRenderPipelineRelease(old_pipeline);
-    }
-    if old_gbuffer_pipeline && platform.gpu.wgpuRenderPipelineRelease {
-        platform.gpu.wgpuRenderPipelineRelease(old_gbuffer_pipeline);
     }
     return true;
 }
@@ -1166,6 +1109,39 @@ renderer_reload_gui_shader :: (
     return true;
 }
 
+renderer_reload_post_shader :: (
+    renderer: *Renderer,
+    platform: *Platform,
+    shader: *Shader_Asset
+) -> bool {
+    renderer.post_shader_attempted_version = shader.asset.version;
+    new_pipeline := renderer_create_post_pipeline(renderer, platform, shader);
+    if !new_pipeline return false;
+    new_bind_group := renderer_create_post_bind_group(renderer, platform, new_pipeline);
+    if !new_bind_group {
+        if platform.gpu.wgpuRenderPipelineRelease {
+            platform.gpu.wgpuRenderPipelineRelease(new_pipeline);
+        }
+        return false;
+    }
+    old_pipeline := renderer.post_pipeline;
+    old_bind_group := renderer.post_bind_group;
+    renderer.post_pipeline = new_pipeline;
+    renderer.post_bind_group = new_bind_group;
+    renderer.post_shader_version = shader.asset.version;
+    if platform.system.log {
+        message := tprint("post shader pipeline reloaded, version %", shader.asset.version);
+        platform.system.log(.{ data = message.data, count = message.count });
+    }
+    if old_bind_group && platform.gpu.wgpuBindGroupRelease {
+        platform.gpu.wgpuBindGroupRelease(old_bind_group);
+    }
+    if old_pipeline && platform.gpu.wgpuRenderPipelineRelease {
+        platform.gpu.wgpuRenderPipelineRelease(old_pipeline);
+    }
+    return true;
+}
+
 renderer_reload_changed_shaders :: (renderer: *Renderer, platform: *Platform, store: *Store) {
     if !renderer.ready return;
     geometry_version := store.geometry_shader.asset.version;
@@ -1175,6 +1151,10 @@ renderer_reload_changed_shaders :: (renderer: *Renderer, platform: *Platform, st
     gui_version := store.gui_shader.asset.version;
     if gui_version != renderer.gui_shader_attempted_version {
         renderer_reload_gui_shader(renderer, platform, *store.gui_shader, *store.verdana_font.atlas);
+    }
+    post_version := store.post_shader.asset.version;
+    if post_version != renderer.post_shader_attempted_version {
+        renderer_reload_post_shader(renderer, platform, *store.post_shader);
     }
 }
 
@@ -1194,6 +1174,7 @@ renderer_push_mesh :: (renderer: *Renderer, mesh: Mesh_Asset, model: M4f, color:
         model = model,
         color = color,
         vertex_offset = mesh.gpu_vertex_offset,
+        triangle_offset = mesh.gpu_triangle_offset,
         flags = flags,
     });
     renderer.draw_batches[renderer.draw_batches.count - 1].instance_count += 1;
@@ -1239,7 +1220,9 @@ renderer_draw :: (
     height: u32,
     capture_frame: bool
 ) {
-    if !renderer.ready || !renderer.bind_group || !renderer.gbuffer_bind_group || !renderer.post_bind_group return;
+    if !renderer.ready || !renderer.bind_group || !renderer.post_bind_group {
+        return;
+    }
     if renderer.depth_width != width || renderer.depth_height != height {
         renderer_resize_depth_attachment(renderer, platform, width, height);
     }
@@ -1304,30 +1287,6 @@ renderer_draw :: (
         }
     }
     gpu.wgpuRenderPassEncoderEnd(color_pass);
-
-    normal_attachment: WGPURenderPassColorAttachment = .{};
-    normal_attachment.view = renderer.multibuffer_normal_view;
-    normal_attachment.loadOp = .Clear;
-    normal_attachment.storeOp = .Store;
-    normal_attachment.clearValue = .{ 0, 0, 0, 0 };
-    gbuffer_pass_descriptor: WGPURenderPassDescriptor = .{};
-    gbuffer_pass_descriptor.colorAttachmentCount = 1;
-    gbuffer_pass_descriptor.colorAttachments = *normal_attachment;
-    gbuffer_depth_attachment: WGPURenderPassDepthStencilAttachment = .{};
-    gbuffer_depth_attachment.view = renderer.multibuffer_depth_view;
-    gbuffer_depth_attachment.depthLoadOp = .Clear;
-    gbuffer_depth_attachment.depthStoreOp = .Store;
-    gbuffer_depth_attachment.depthClearValue = 1.0;
-    gbuffer_pass_descriptor.depthStencilAttachment = *gbuffer_depth_attachment;
-    gbuffer_pass := gpu.wgpuCommandEncoderBeginRenderPass(encoder, *gbuffer_pass_descriptor);
-    if renderer.instances.count > 0 {
-        gpu.wgpuRenderPassEncoderSetPipeline(gbuffer_pass, renderer.gbuffer_pipeline);
-        gpu.wgpuRenderPassEncoderSetBindGroup(gbuffer_pass, 0, renderer.gbuffer_bind_group, 0, null);
-        for renderer.draw_batches {
-            gpu.wgpuRenderPassEncoderDraw(gbuffer_pass, it.vertex_count, it.instance_count, 0, it.first_instance);
-        }
-    }
-    gpu.wgpuRenderPassEncoderEnd(gbuffer_pass);
 
     presentation_attachment: WGPURenderPassColorAttachment = .{};
     presentation_attachment.view = presentation_view;
