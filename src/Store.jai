@@ -177,28 +177,6 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         has_normal: bool;
     }
 
-    next_line :: (remaining: *string) -> string {
-        found, line, tail := split_from_left(remaining.*, #char "\n");
-        if found {
-            remaining.* = tail;
-            return line;
-        }
-        line = remaining.*;
-        remaining.* = "";
-        return line;
-    }
-
-    next_token :: (remaining: *string) -> string {
-        token, found := parse_token(remaining, "", " \t\r\n");
-        if !found return "";
-        return token;
-    }
-
-    parse_index :: (text: string) -> s64, bool {
-        value, parsed, tail := string_to_int(text);
-        return value, parsed && tail.count == 0;
-    }
-
     parse_face_corner :: (text: string) -> Obj_Face_Corner, bool {
         has_first_slash, position_text, after_position := split_from_left(text, #char "/");
         position_index, position_parsed := parse_index(position_text);
@@ -229,8 +207,8 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         return cast(int) index, true;
     }
 
-    fail :: (asset: *Mesh_Asset) {
-        asset.asset.state = .FAILED;
+    fail :: () {
+        mesh.asset.state = .FAILED;
     }
 
     if mesh.asset.bytes.count == 0 || mesh.vertices.count > 0 return;
@@ -249,7 +227,7 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         if keyword == "v" {
             position: V3f;
             if !scan2(line, "v % % %", *position.x, *position.y, *position.z) {
-                fail(mesh);
+                fail();
                 return;
             }
             array_add(*positions, position);
@@ -258,7 +236,7 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         if keyword == "vn" {
             normal: V3f;
             if !scan2(line, "vn % % %", *normal.x, *normal.y, *normal.z) {
-                fail(mesh);
+                fail();
                 return;
             }
             array_add(*normals, normal);
@@ -270,13 +248,13 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         for 0..2 {
             corner, parsed := parse_face_corner(next_token(*remaining));
             if !parsed {
-                fail(mesh);
+                fail();
                 return;
             }
             corners[it] = corner;
         }
         if next_token(*remaining).count != 0 {
-            fail(mesh);
+            fail();
             return;
         }
 
@@ -284,7 +262,7 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         for 0..2 {
             position_index, resolved := resolve_index(corners[it].position_index, positions.count);
             if !resolved {
-                fail(mesh);
+                fail();
                 return;
             }
             position_indices[it] = position_index;
@@ -299,7 +277,7 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
             if corners[it].has_normal {
                 normal_index, resolved := resolve_index(corners[it].normal_index, normals.count);
                 if !resolved {
-                    fail(mesh);
+                    fail();
                     return;
                 }
                 normal = normals[normal_index];
@@ -308,7 +286,7 @@ store_promote_obj_mesh :: (mesh: *Mesh_Asset, store: *Store) {
         }
     }
     if mesh.vertices.count == 0 {
-        fail(mesh);
+        fail();
     }
 }
 
